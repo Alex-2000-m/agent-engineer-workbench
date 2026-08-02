@@ -1,0 +1,31 @@
+{
+  "type": "object",
+  "properties": {
+    "reply": { "type": "string" },
+    "patch": {
+      "type": "object",
+      "properties": {
+        "enabledSources": {
+          "type": ["array", "null"],
+          "items": { "enum": ["github", "blog", "report", "news", "web"] }
+        },
+        "radarTime": { "type": ["string", "null"] },
+        "auditDay": { "type": ["string", "null"], "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun", null] },
+        "auditTime": { "type": ["string", "null"] },
+        "gcDay": { "type": ["integer", "null"] },
+        "gcTime": { "type": ["string", "null"] },
+        "reviewWindowDays": { "type": ["integer", "null"] },
+        "archiveAfterDays": { "type": ["integer", "null"] },
+        "defaultTtlDays": { "type": ["integer", "null"] }
+      },
+      "required": ["enabledSources", "radarTime", "auditDay", "auditTime", "gcDay", "gcTime", "reviewWindowDays", "archiveAfterDays", "defaultTtlDays"],
+      "additionalProperties": false
+    },
+    "routines": {
+      "type": "array",
+      "items": { "enum": ["sync", "audit", "gc"] }
+    }
+  },
+  "required": ["reply", "patch", "routines"],
+  "additionalProperties": false
+}
