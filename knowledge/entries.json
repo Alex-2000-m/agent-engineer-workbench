@@ -1,0 +1,156 @@
+[
+  {
+    "id": "openai-plugins-universal-directory",
+    "title": "OpenAI Plugins 成为 Codex 可分发能力单元",
+    "category": "Plugin",
+    "status": "verified",
+    "confidence": "high",
+    "freshnessClass": "fast",
+    "source": "OpenAI Plugins",
+    "sourceUrl": "https://github.com/openai/plugins",
+    "sourceVersion": "main@2026-08-02",
+    "observedAt": "2026-08-02",
+    "lastVerifiedAt": "2026-08-02",
+    "validUntil": "2026-08-16",
+    "summary": "Plugin 可以把 Skill、连接器、MCP 配置和资源打包，并在 Codex 支持的插件目录中安装。",
+    "impact": "团队工作流可以从个人 Skill 升级为可安装、可治理的能力包。",
+    "tags": [
+      "codex",
+      "plugin",
+      "distribution"
+    ],
+    "action": "将稳定的 Agent 工程流程打包为团队插件"
+  },
+  {
+    "id": "huggingface-mcp-hub",
+    "title": "Hugging Face MCP 覆盖模型、数据集、论文与 Spaces",
+    "category": "MCP",
+    "status": "verified",
+    "confidence": "high",
+    "freshnessClass": "fast",
+    "source": "Hugging Face",
+    "sourceUrl": "https://huggingface.co/docs/hub/en/agents-mcp",
+    "sourceVersion": "docs@2026-08-02",
+    "observedAt": "2026-08-02",
+    "lastVerifiedAt": "2026-08-02",
+    "validUntil": "2026-08-16",
+    "summary": "一个入口即可搜索 Hub 资源、研究论文和文档，并可调用经过选择的社区工具。",
+    "impact": "适合作为 Agent 工程师每日模型与论文雷达的结构化来源。",
+    "tags": [
+      "hugging-face",
+      "papers",
+      "models"
+    ],
+    "action": "加入每日雷达的数据源"
+  },
+  {
+    "id": "context7-cli-skill-mcp",
+    "title": "Context7 同时提供 CLI + Skill 与 MCP 两种模式",
+    "category": "MCP",
+    "status": "verified",
+    "confidence": "high",
+    "freshnessClass": "medium",
+    "source": "Context7",
+    "sourceUrl": "https://github.com/upstash/context7",
+    "sourceVersion": "main@2026-08-02",
+    "observedAt": "2026-08-02",
+    "lastVerifiedAt": "2026-08-02",
+    "validUntil": "2026-09-01",
+    "summary": "可按库名和版本获取最新文档；高频编码场景可以选择更节省上下文的 CLI + Skill。",
+    "impact": "降低因训练数据陈旧而生成过期 API 的概率。",
+    "tags": [
+      "documentation",
+      "versions",
+      "coding"
+    ],
+    "action": "为依赖升级和代码生成配置默认触发规则"
+  },
+  {
+    "id": "deepwiki-public-repositories",
+    "title": "DeepWiki MCP 可快速理解公共仓库架构",
+    "category": "Research",
+    "status": "verified",
+    "confidence": "high",
+    "freshnessClass": "medium",
+    "source": "DeepWiki",
+    "sourceUrl": "https://docs.devin.ai/work-with-devin/deepwiki-mcp",
+    "sourceVersion": "docs@2026-08-02",
+    "observedAt": "2026-08-02",
+    "lastVerifiedAt": "2026-08-02",
+    "validUntil": "2026-09-01",
+    "summary": "提供公共 GitHub 仓库的文档结构、内容读取和基于仓库上下文的问答。",
+    "impact": "在克隆和运行项目前先完成低成本架构筛选。",
+    "tags": [
+      "repository",
+      "architecture",
+      "research"
+    ],
+    "action": "接入 repo-to-spike 的预筛阶段"
+  },
+  {
+    "id": "github-mcp-read-only",
+    "title": "GitHub MCP 的只读与 Lockdown 模式应成为雷达默认值",
+    "category": "Security",
+    "status": "review",
+    "confidence": "high",
+    "freshnessClass": "fast",
+    "source": "GitHub MCP",
+    "sourceUrl": "https://github.com/github/github-mcp-server",
+    "sourceVersion": "main@2026-08-02",
+    "observedAt": "2026-07-20",
+    "lastVerifiedAt": "2026-07-20",
+    "validUntil": "2026-08-05",
+    "summary": "日常扫描不需要写权限；写入 Issue、PR 和代码应进入独立审批路径。",
+    "impact": "显著降低外部内容通过提示注入触发仓库写操作的风险。",
+    "tags": [
+      "github",
+      "least-privilege",
+      "security"
+    ],
+    "action": "复核当前服务端工具集并限制为读取工具"
+  },
+  {
+    "id": "notion-headless-oauth",
+    "title": "Notion 远程 MCP 不适合作为完全无人值守写入层",
+    "category": "MCP",
+    "status": "review",
+    "confidence": "high",
+    "freshnessClass": "fast",
+    "source": "Notion MCP",
+    "sourceUrl": "https://developers.notion.com/guides/mcp/get-started-with-mcp",
+    "sourceVersion": "API 2026-03-11",
+    "observedAt": "2026-07-18",
+    "lastVerifiedAt": "2026-07-18",
+    "validUntil": "2026-08-04",
+    "summary": "官方远程服务使用用户 OAuth，不支持 bearer token，因此全自动后台写入需要另外设计。",
+    "impact": "Git Markdown 更适合作为无人值守知识事实源；Notion 用于人工协作视图。",
+    "tags": [
+      "notion",
+      "oauth",
+      "automation"
+    ],
+    "action": "保持 Git 仓库为唯一事实源"
+  },
+  {
+    "id": "reference-memory-production",
+    "title": "参考 Memory MCP 不应直接承担生产知识库",
+    "category": "Security",
+    "status": "stale",
+    "confidence": "medium",
+    "freshnessClass": "slow",
+    "source": "MCP Reference Servers",
+    "sourceUrl": "https://github.com/modelcontextprotocol/servers",
+    "sourceVersion": "review-needed",
+    "observedAt": "2026-04-02",
+    "lastVerifiedAt": "2026-04-02",
+    "validUntil": "2026-07-01",
+    "summary": "参考服务器的定位是教学与协议展示，需要自行评估安全和生产要求。",
+    "impact": "避免把示例实现误当成具备治理、备份和审计能力的生产系统。",
+    "tags": [
+      "memory",
+      "reference",
+      "production"
+    ],
+    "action": "重新验证并选择 Git 或受治理的数据层"
+  }
+]

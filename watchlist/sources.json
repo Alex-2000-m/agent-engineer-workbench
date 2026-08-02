@@ -1,0 +1,14 @@
+[
+  { "repo": "openai/openai-agents-python", "category": "SDK", "ttlDays": 14 },
+  { "repo": "openai/openai-agents-js", "category": "SDK", "ttlDays": 14 },
+  { "repo": "openai/plugins", "category": "Plugin", "ttlDays": 14 },
+  { "repo": "modelcontextprotocol/specification", "category": "MCP", "ttlDays": 14 },
+  { "repo": "modelcontextprotocol/servers", "category": "MCP", "ttlDays": 14 },
+  { "repo": "github/github-mcp-server", "category": "MCP", "ttlDays": 14 },
+  { "repo": "huggingface/smolagents", "category": "SDK", "ttlDays": 21 },
+  { "repo": "langchain-ai/langgraph", "category": "SDK", "ttlDays": 21 },
+  { "repo": "pydantic/pydantic-ai", "category": "SDK", "ttlDays": 21 },
+  { "repo": "run-llama/llama_index", "category": "SDK", "ttlDays": 21 },
+  { "repo": "crewAIInc/crewAI", "category": "SDK", "ttlDays": 21 },
+  { "repo": "browser-use/browser-use", "category": "Tool", "ttlDays": 14 }
+]
