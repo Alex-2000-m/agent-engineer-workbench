@@ -25,7 +25,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if git diff --quiet; then exit 0; fi
+          if git diff --quiet -- knowledge/entries.json; then exit 0; fi
           branch="automation/freshness-audit-$(date -u +%Y%m%d)"
           git config user.name "agent-workbench[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
