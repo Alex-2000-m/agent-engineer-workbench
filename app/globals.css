@@ -314,28 +314,49 @@ footer > span { text-align: right; font: 9px ui-monospace, monospace; color: var
 .clear-button { border: 1px solid var(--line); border-radius: 6px; padding: 12px 16px; background: transparent; cursor: pointer; font-size: 11px; font-weight: 700; }
 
 .pet-agent { position: fixed; right: 24px; bottom: 20px; z-index: 60; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
-.pet-button { border: 0; background: transparent; cursor: pointer; display: grid; justify-items: center; gap: 4px; filter: drop-shadow(0 12px 20px rgba(21,32,25,.24)); }
-.pet-face { position: relative; width: 74px; height: 66px; border: 2px solid var(--ink); border-radius: 44% 44% 48% 48%; display: grid; place-items: center; background: var(--lime); }
-.pet-face::before, .pet-face::after { content: ""; position: absolute; top: -10px; width: 19px; height: 25px; border: 2px solid var(--ink); background: var(--lime); transform: rotate(35deg); z-index: -1; }
-.pet-face::before { left: 7px; }
-.pet-face::after { right: 7px; transform: rotate(-35deg); }
-.pet-face i { position: absolute; top: 8px; right: 8px; width: 9px; height: 9px; border-radius: 50%; background: #46a469; box-shadow: 0 0 0 4px rgba(70,164,105,.18); }
-.pet-face b { font: 800 15px ui-monospace, monospace; }
-.pet-button small { padding: 4px 8px; border-radius: 999px; background: var(--ink); color: #fff; font: 8px ui-monospace, monospace; }
-.pet-chat { width: min(370px, calc(100vw - 32px)); height: 480px; border: 1px solid rgba(21,32,25,.25); border-radius: 12px; display: grid; grid-template-rows: auto 1fr auto; background: var(--cream); box-shadow: 0 24px 70px rgba(21,32,25,.28); overflow: hidden; }
-.pet-chat-header { padding: 14px 16px; background: var(--ink); color: #fff; display: flex; justify-content: space-between; align-items: center; }
+.pet-button { border: 0; background: transparent; cursor: pointer; display: grid; justify-items: center; gap: 7px; filter: drop-shadow(8px 10px 0 rgba(21,32,25,.16)); }
+.pet-button:focus-visible { outline: 3px solid var(--blue); outline-offset: 5px; }
+.pixel-pet { --pet-color: var(--lime); position: relative; width: 78px; height: 70px; display: block; image-rendering: pixelated; }
+.pixel-pet-body { position: absolute; left: 13px; top: 18px; width: 52px; height: 42px; background: var(--pet-color); box-shadow: -4px 0 0 var(--ink), 4px 0 0 var(--ink), 0 -4px 0 var(--ink), 0 4px 0 var(--ink), 4px 4px 0 var(--ink); }
+.pixel-ear { position: absolute; top: 6px; width: 18px; height: 18px; background: var(--pet-color); box-shadow: -4px 0 0 var(--ink), 4px 0 0 var(--ink), 0 -4px 0 var(--ink); }
+.pixel-ear-left { left: 13px; }
+.pixel-ear-right { right: 13px; }
+.pixel-tail { position: absolute; right: 1px; top: 38px; width: 12px; height: 20px; background: var(--pet-color); box-shadow: 4px 0 0 var(--ink), 0 4px 0 var(--ink), 0 -4px 0 var(--ink); }
+.pixel-eye { position: absolute; top: 13px; width: 6px; height: 9px; background: var(--ink); }
+.pixel-eye-left { left: 11px; }
+.pixel-eye-right { right: 11px; }
+.pixel-muzzle { position: absolute; left: 24px; top: 23px; width: 5px; height: 5px; background: var(--coral); }
+.pixel-mouth { position: absolute; left: 20px; top: 30px; width: 13px; height: 4px; background: var(--ink); box-shadow: -4px -3px 0 var(--ink), 4px -3px 0 var(--ink); }
+.pixel-status-light { position: absolute; right: 7px; top: 11px; width: 8px; height: 8px; background: var(--blue); box-shadow: 0 0 0 3px var(--ink); }
+.pixel-pet-running { animation: pixel-pet-run .7s steps(2, end) infinite; }
+.pixel-pet-running .pixel-status-light { background: var(--lime); animation: pixel-blink .55s steps(2, end) infinite; }
+.pixel-pet-needs-input .pixel-status-light { background: #ffe58c; animation: pixel-blink 1s steps(2, end) infinite; }
+.pixel-pet-ready .pixel-status-light { background: var(--blue); }
+.pixel-pet-blocked { --pet-color: var(--coral); animation: pixel-pet-blocked .5s steps(2, end) infinite; }
+.pixel-pet-blocked .pixel-status-light { background: var(--coral); }
+.pixel-pet-compact { width: 42px; height: 38px; transform: scale(.52); transform-origin: left center; margin-right: -18px; }
+.pet-button > small { padding: 6px 9px; border: 2px solid var(--ink); border-radius: 2px; background: var(--cream); color: var(--ink); font: 800 8px ui-monospace, monospace; text-transform: uppercase; box-shadow: 3px 3px 0 var(--ink); }
+.pet-button > small i { width: 6px; height: 6px; margin-right: 6px; display: inline-block; background: var(--lime); box-shadow: 0 0 0 1px var(--ink); }
+.pet-chat { width: min(380px, calc(100vw - 32px)); height: 490px; border: 3px solid var(--ink); border-radius: 2px; display: grid; grid-template-rows: auto 1fr auto; background: var(--cream); box-shadow: 9px 9px 0 rgba(21,32,25,.22); overflow: hidden; }
+.pet-chat-header { min-height: 62px; padding: 10px 14px; background: var(--ink); color: #fff; display: flex; justify-content: space-between; align-items: center; }
 .pet-chat-header > div { display: flex; align-items: center; gap: 8px; }
-.pet-chat-header strong { font-size: 12px; }
-.pet-chat-header button { border: 0; background: transparent; color: #fff; cursor: pointer; font-size: 19px; }
-.pet-mini { width: 28px; height: 28px; border-radius: 50%; background: var(--lime); color: var(--ink); display: grid; place-items: center; font: 800 9px ui-monospace, monospace; }
+.pet-chat-header > div > span:not(.pixel-pet) { display: grid; gap: 3px; }
+.pet-chat-header strong { font-size: 11px; letter-spacing: .04em; }
+.pet-chat-header small { color: var(--lime); font: 7px ui-monospace, monospace; letter-spacing: .1em; text-transform: uppercase; }
+.pet-chat-header button { width: 30px; height: 30px; border: 2px solid #fff; border-radius: 0; background: transparent; color: #fff; cursor: pointer; font-size: 17px; }
 .pet-messages { padding: 16px; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
-.pet-messages p { max-width: 84%; margin: 0; padding: 10px 12px; border-radius: 10px; font-size: 11px; line-height: 1.55; }
+.pet-messages p { max-width: 86%; margin: 0; padding: 10px 12px; border: 2px solid var(--ink); border-radius: 2px; font-size: 11px; line-height: 1.55; box-shadow: 3px 3px 0 rgba(21,32,25,.13); }
 .pet-messages .agent { align-self: flex-start; background: #e9eee7; }
 .pet-messages .user { align-self: flex-end; background: var(--ink); color: #fff; }
-.pet-chat form { padding: 12px; border-top: 1px solid var(--line); display: grid; grid-template-columns: 1fr 38px; gap: 8px; }
-.pet-chat form input { min-width: 0; border: 1px solid var(--line); border-radius: 7px; padding: 10px; outline: none; font-size: 11px; }
-.pet-chat form button { border: 0; border-radius: 7px; background: var(--ink); color: var(--lime); cursor: pointer; font-size: 18px; }
+.pet-chat form { padding: 12px; border-top: 3px solid var(--ink); display: grid; grid-template-columns: 1fr 40px; gap: 8px; }
+.pet-chat form input { min-width: 0; border: 2px solid var(--ink); border-radius: 0; padding: 10px; outline: none; font-size: 11px; }
+.pet-chat form input:focus { box-shadow: 3px 3px 0 var(--blue); }
+.pet-chat form button { border: 2px solid var(--ink); border-radius: 0; background: var(--lime); color: var(--ink); cursor: pointer; font-size: 18px; box-shadow: 3px 3px 0 var(--ink); }
 .pet-chat form button:disabled { opacity: .4; }
+
+@keyframes pixel-pet-run { 50% { transform: translateY(-5px); } }
+@keyframes pixel-pet-blocked { 50% { transform: translateX(4px); } }
+@keyframes pixel-blink { 50% { opacity: .25; } }
 
 @media (max-width: 900px) {
   nav { min-width: 0; gap: 18px; overflow-x: auto; white-space: nowrap; }
@@ -387,12 +408,12 @@ footer > span { text-align: right; font: 9px ui-monospace, monospace; color: var
   .bridge-heading { flex-direction: column; }
   .modal-backdrop { padding: 10px; }
   .pet-agent { right: 12px; bottom: 12px; }
-  .pet-face { width: 62px; height: 56px; }
+  .pixel-pet:not(.pixel-pet-compact) { transform: scale(.88); transform-origin: right bottom; margin: -4px -2px; }
   footer { grid-template-columns: 1fr; gap: 24px; text-align: left; }
   footer p, footer > span { text-align: left; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  .quickstart-hero .hero-copy, .quickstart-console, .setup-step, .setup-flow b, .quickstart-status > span.ready { animation: none; }
+  .quickstart-hero .hero-copy, .quickstart-console, .setup-step, .setup-flow b, .quickstart-status > span.ready, .pixel-pet, .pixel-status-light { animation: none; }
 }

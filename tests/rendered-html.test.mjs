@@ -17,6 +17,7 @@ test("server-renders a focused Dashboard", async () => {
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /<title>Agent Workbench/);
+  assert.match(html, /rel="icon"[^>]+type="image\/png"/);
   assert.match(html, /Dashboard/);
   assert.match(html, /你的知识库还是空的/);
   assert.match(html, /GitHub 基础模式/);
@@ -47,8 +48,8 @@ test("knowledge, sources, and automation have separate pages", async () => {
   assert.doesNotMatch(knowledge, /五路信号，分开判断/);
   assert.match(sources, /五路信号，分开判断/);
   assert.match(sources, /当前 Fork 的实际监测源/);
-  assert.match(sources, /openai\/openai-agents-python/);
-  assert.match(sources, /直接告诉 Codex 你想关注什么/);
+  assert.match(sources, /Agent 工具创建和修改/);
+  assert.match(sources, /直接告诉 Codex 或像素桌宠你想关注什么/);
   assert.doesNotMatch(sources, /知识库与导读/);
   assert.match(automation, /让知识自己保持清醒/);
   assert.match(automation, /配置来源、时间与过期策略/);

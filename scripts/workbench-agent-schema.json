@@ -24,8 +24,46 @@
     "routines": {
       "type": "array",
       "items": { "enum": ["sync", "audit", "gc"] }
+    },
+    "sourceUpserts": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "adapter": { "enum": ["github-releases", "rss"] },
+          "sourceType": { "enum": ["github", "blog", "report", "news", "web"] },
+          "category": { "type": "string" },
+          "ttlDays": { "type": "integer" },
+          "repo": { "type": ["string", "null"] },
+          "name": { "type": ["string", "null"] },
+          "feedUrl": { "type": ["string", "null"] },
+          "keywords": { "type": ["array", "null"], "items": { "type": "string" } }
+        },
+        "required": ["id", "adapter", "sourceType", "category", "ttlDays", "repo", "name", "feedUrl", "keywords"],
+        "additionalProperties": false
+      }
+    },
+    "sourceRemovals": {
+      "type": "array",
+      "maxItems": 5,
+      "items": { "type": "string" }
+    },
+    "categoryRenames": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "properties": {
+          "from": { "type": "string" },
+          "to": { "type": "string" }
+        },
+        "required": ["from", "to"],
+        "additionalProperties": false
+      }
     }
   },
-  "required": ["reply", "patch", "routines"],
+  "required": ["reply", "patch", "routines", "sourceUpserts", "sourceRemovals", "categoryRenames"],
   "additionalProperties": false
 }

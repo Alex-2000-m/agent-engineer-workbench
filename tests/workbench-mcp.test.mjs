@@ -35,14 +35,25 @@ test("MCP lets a local CLI customize sources and knowledge in an isolated Fork w
     await client.connect(transport);
     const tools = await client.listTools();
     assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
-      "get_workbench_snapshot", "propose_knowledge_entry", "remove_watch_source", "run_knowledge_routine",
+      "get_workbench_snapshot", "propose_knowledge_entry", "remove_watch_source", "rename_watch_category", "run_knowledge_routine",
       "update_knowledge_entry", "update_workspace_settings", "upsert_watch_source",
     ]);
+    const resources = await client.listResources();
+    assert.deepEqual(resources.resources.map((resource) => resource.uri).sort(), [
+      "workbench://knowledge", "workbench://settings", "workbench://snapshot", "workbench://sources",
+    ]);
+    const sourceResource = await client.readResource({ uri: "workbench://sources" });
+    assert.deepEqual(JSON.parse(sourceResource.contents[0].text), []);
+    const prompts = await client.listPrompts();
+    assert.ok(prompts.prompts.some((prompt) => prompt.name === "manage-workbench"));
+    const prompt = await client.getPrompt({ name: "manage-workbench", arguments: { request: "Add a source" } });
+    assert.match(prompt.messages[0].content.text, /workbench:\/\/snapshot/);
 
     await client.callTool({ name: "upsert_watch_source", arguments: {
       id: "anthropic-sdk", adapter: "github-releases", sourceType: "github", category: "SDK", ttlDays: 14,
       repo: "anthropics/anthropic-sdk-python",
     } });
+    await client.callTool({ name: "rename_watch_category", arguments: { from: "SDK", to: "Agent SDK" } });
     const proposed = await client.callTool({ name: "propose_knowledge_entry", arguments: {
       title: "Agent evaluation note", sourceType: "report", source: "Example Lab",
       sourceUrl: "https://example.com/report", summary: "A sourced candidate for evaluation workflows.",
@@ -54,6 +65,7 @@ test("MCP lets a local CLI customize sources and knowledge in an isolated Fork w
 
     const snapshotResult = await client.callTool({ name: "get_workbench_snapshot", arguments: {} });
     assert.equal(snapshotResult.structuredContent.sources[0].repo, "anthropics/anthropic-sdk-python");
+    assert.equal(snapshotResult.structuredContent.sources[0].category, "Agent SDK");
     assert.equal(snapshotResult.structuredContent.entries[0].id, entryId);
     assert.equal(snapshotResult.structuredContent.entries[0].status, "candidate");
     assert.deepEqual(snapshotResult.structuredContent.entries[0].tags, ["eval", "multi-agent"]);

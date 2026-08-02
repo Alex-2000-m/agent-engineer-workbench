@@ -20,7 +20,7 @@ test("fork knowledge snapshot contains repository data and settings", async () =
   const snapshot = await getSnapshot();
   assert.equal(snapshot.version, 1);
   assert.ok(Array.isArray(snapshot.entries));
-  assert.ok(snapshot.sources.length > 0);
+  assert.ok(Array.isArray(snapshot.sources));
   assert.ok(snapshot.settings.enabledSources.length > 0);
 });
 

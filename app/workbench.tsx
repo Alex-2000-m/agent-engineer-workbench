@@ -191,6 +191,31 @@ function applyFreshnessPolicy(entry: KnowledgeEntry, settings: WorkspaceSettings
 }
 
 type WorkbenchView = "dashboard" | "knowledge" | "sources" | "automation";
+type PetActivity = "running" | "needs-input" | "ready" | "blocked";
+
+const petActivityLabel: Record<PetActivity, string> = {
+  running: "正在工作",
+  "needs-input": "等你指令",
+  ready: "有空来聊",
+  blocked: "需要检查",
+};
+
+function PixelPet({ status, compact = false }: { status: PetActivity; compact?: boolean }) {
+  return (
+    <span className={`pixel-pet pixel-pet-${status}${compact ? " pixel-pet-compact" : ""}`} aria-hidden="true">
+      <i className="pixel-ear pixel-ear-left" />
+      <i className="pixel-ear pixel-ear-right" />
+      <i className="pixel-tail" />
+      <span className="pixel-pet-body">
+        <i className="pixel-eye pixel-eye-left" />
+        <i className="pixel-eye pixel-eye-right" />
+        <i className="pixel-muzzle" />
+        <i className="pixel-mouth" />
+      </span>
+      <i className="pixel-status-light" />
+    </span>
+  );
+}
 
 export function Workbench({ entries, initialGuides, initialSettings = defaultWorkspaceSettings, initialSources, view = "dashboard" }: { entries: KnowledgeEntry[]; initialGuides: Record<string, Guide>; initialSettings?: WorkspaceSettings; initialSources: WatchSource[]; view?: WorkbenchView }) {
   const [query, setQuery] = useState("");
@@ -207,6 +232,7 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
   const [petOpen, setPetOpen] = useState(false);
   const [petInput, setPetInput] = useState("");
   const [petLoading, setPetLoading] = useState(false);
+  const [petBlocked, setPetBlocked] = useState(false);
   const [bridgeUrl, setBridgeUrl] = useState("http://127.0.0.1:4317");
   const [bridgeStatus, setBridgeStatus] = useState<"disconnected" | "connecting" | "connected" | "error">("disconnected");
   const [bridgeUpdatedAt, setBridgeUpdatedAt] = useState("");
@@ -218,6 +244,7 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
   const repositoryUrl = process.env.NEXT_PUBLIC_REPOSITORY_URL ?? "https://github.com";
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
   const aiEnabled = bridgeStatus === "connected";
+  const petActivity: PetActivity = petBlocked ? "blocked" : petLoading ? "running" : petOpen ? "needs-input" : "ready";
 
   useEffect(() => {
     const requestedSource = new URLSearchParams(window.location.search).get("source");
@@ -453,11 +480,13 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
     setPetMessages((current) => [...current, { role: "user", text: message }]);
     setPetInput("");
     setPetLoading(true);
+    setPetBlocked(false);
     try {
       const result = await bridgeRequest("/agent", { method: "POST", body: JSON.stringify({ message }) }) as { reply: string; snapshot?: BridgeSnapshot };
       if (result.snapshot) applyBridgeSnapshot(result.snapshot);
       setPetMessages((current) => [...current, { role: "agent", text: result.reply }]);
     } catch (error) {
+      setPetBlocked(true);
       setPetMessages((current) => [...current, { role: "agent", text: error instanceof Error ? error.message : "我暂时没能完成设置。" }]);
     } finally {
       setPetLoading(false);
@@ -532,7 +561,7 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
         <div className="source-intro">
           <p className="eyebrow">SOURCE LENSES</p>
           <h2>五路信号，分开判断。</h2>
-          <p>代码变化看版本，博客看经验边界，报告看方法与样本，新闻看事件，网络知识看可追溯性。不同来源使用不同验证标准。</p>
+          <p>五类来源只定义验证方法；SDK、MCP、评测等具体类目，以及每一个 GitHub / RSS 监测源，都由用户通过 Agent 工具创建和修改。</p>
         </div>
         <div className="source-grid">
           {sourceTypes.map((source) => {
@@ -563,9 +592,9 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
               <div className="source-registry-meta"><code>{source.id}</code><span>TTL {source.ttlDays}d</span>{href && <a href={href} target="_blank" rel="noreferrer">打开 ↗</a>}</div>
             </article>;
           })}
-          {watchSources.length === 0 && <div className="empty-state">当前 Fork 还没有监测源。</div>}
+          {watchSources.length === 0 && <div className="empty-state"><strong>这是一个空框架。</strong><p>连接本地 CLI 后，让 Agent 创建你的第一个类目和监测源。</p></div>}
         </div>
-        <div className="cli-chat-callout"><span>CLI CHAT</span><div><strong>直接告诉 Codex 你想关注什么</strong><p>它会调用 MCP 更新当前 Fork 的来源文件，并展示 Git 差异。</p><code>“关注 anthropics/anthropic-sdk-python 的 Release，归为 SDK，14 天复核；再移除我不再看的来源。”</code></div></div>
+        <div className="cli-chat-callout"><span>MCP CONTROL</span><div><strong>直接告诉 Codex 或像素桌宠你想关注什么</strong><p>Agent 会读取工作台资源，调用 MCP 创建类目、增改监测源，并展示 Git 差异。</p><code>“新建 SDK 类目，关注 owner/repo 的 Release，14 天复核；再把 SDK 类目改名为 Agent SDK。”</code></div></div>
       </section></>}
 
       {view === "automation" && <section className="freshness-section page-section" id="freshness">
@@ -707,20 +736,20 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
         <aside className={`pet-agent${petOpen ? " pet-open" : ""}`} aria-label="工作台桌宠 Agent">
           {petOpen && (
             <section className="pet-chat">
-              <div className="pet-chat-header"><div><span className="pet-mini">•ᴗ•</span><strong>Local CLI Agent</strong></div><button type="button" onClick={() => setPetOpen(false)} aria-label="收起桌宠对话">×</button></div>
+              <div className="pet-chat-header"><div><PixelPet status={petActivity} compact /><span><strong>Workbench Agent</strong><small>{petActivityLabel[petActivity]} · LOCAL MCP</small></span></div><button type="button" onClick={() => setPetOpen(false)} aria-label="收起桌宠对话">×</button></div>
               <div className="pet-messages" aria-live="polite">
                 {petMessages.map((message, index) => <p className={message.role} key={`${message.role}-${index}`}>{message.text}</p>)}
-                {petLoading && <p className="agent">本地 Agent 正在思考并调整…</p>}
+                {petLoading && <p className="agent">本地 Agent 正在读取 MCP 状态并执行工具…</p>}
               </div>
               <form onSubmit={sendPetMessage}>
-                <input value={petInput} onChange={(event) => setPetInput(event.target.value)} placeholder="例如：只看 GitHub 和报告，每天 9 点更新" aria-label="向工作台 Agent 发送消息" />
+                <input value={petInput} onChange={(event) => setPetInput(event.target.value)} placeholder="例如：新增一个监测源，把 SDK 类目改名" aria-label="向工作台 Agent 发送消息" />
                 <button type="submit" disabled={petLoading || !petInput.trim()}>↑</button>
               </form>
             </section>
           )}
           <button type="button" className="pet-button" onClick={() => setPetOpen((open) => !open)} aria-expanded={petOpen}>
-            <span className="pet-face"><i /><b>•ᴗ•</b></span>
-            <small>{petOpen ? "收起" : "问问我"}</small>
+            <PixelPet status={petActivity} />
+            <small><i />{petOpen ? "收起面板" : petActivityLabel[petActivity]}</small>
           </button>
         </aside>
       )}
