@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { defaultSettings, getDueRoutines, getSnapshot, normalizeSettings, runLocalEnhancement } from "../scripts/workbench-core.mjs";
+import { defaultSettings, getDueRoutines, getSnapshot, normalizeSettings, normalizeWatchSource, runLocalEnhancement } from "../scripts/workbench-core.mjs";
 import { githubPagesUrl, parseGitHubRemote } from "../scripts/workbench-repository.mjs";
 
 test("normalizes local Agent patches without letting null values erase policy", () => {
@@ -29,6 +29,22 @@ test("local scheduler honors personal daily, weekly, and monthly times", () => {
   const due = getDueRoutines(settings, new Date(2026, 7, 2, 9, 0));
   assert.deepEqual(due, ["sync", "audit", "gc"]);
   assert.deepEqual(getDueRoutines(settings, new Date(2026, 7, 2, 9, 1)), []);
+});
+
+test("normalizes GitHub and RSS sources supplied through CLI chat", () => {
+  assert.deepEqual(normalizeWatchSource({
+    id: "anthropic-sdk", adapter: "github-releases", sourceType: "github", category: "SDK", ttlDays: 14, repo: "anthropics/anthropic-sdk-python",
+  }), {
+    id: "anthropic-sdk", adapter: "github-releases", sourceType: "github", category: "SDK", ttlDays: 14, repo: "anthropics/anthropic-sdk-python",
+  });
+  const rss = normalizeWatchSource({
+    id: "agent-report", adapter: "rss", sourceType: "report", category: "Research", ttlDays: 30,
+    name: "Agent Reports", feedUrl: "https://example.com/feed.xml", keywords: ["agent", "agent", " eval "],
+  });
+  assert.equal(rss.feedUrl, "https://example.com/feed.xml");
+  assert.deepEqual(rss.keywords, ["agent", "eval"]);
+  assert.throws(() => normalizeWatchSource({ id: "bad", adapter: "github-releases", sourceType: "github", category: "SDK", repo: "not-a-repo" }), /owner\/name/);
+  assert.throws(() => normalizeWatchSource({ id: "bad", adapter: "rss", sourceType: "blog", category: "Blog", name: "Bad", feedUrl: "ftp://example.com/feed" }), /HTTP or HTTPS/);
 });
 
 test("local enhancement accepts only IDs from the current Fork", async () => {

@@ -71,7 +71,7 @@ flowchart LR
 
 - `/`：Dashboard，只展示指标、连接状态和今日雷达。
 - `/knowledge/`：知识检索、来源摘录、AI 导读和证据说明。
-- `/sources/`：五类来源的独立视图与数量。
+- `/sources/`：五类来源视图、当前 Fork 的实际监测源和 CLI 对话示例。
 - `/automation/`：新鲜度生命周期、采集/审计/归档和策略设置。
 - `/quickstart/`：Fork、Pages、MCP 安装与更新教程。
 
@@ -139,14 +139,21 @@ AI 不能直接把内容标记为 `verified`。自动采集一律创建 `candida
 - `update_workspace_settings`：调整来源类别、时间和过期策略。
 - `run_knowledge_routine`：运行 `sync`、`audit` 或 `gc` 白名单任务。
 - `propose_knowledge_entry`：向当前 Fork 添加带来源的 `candidate`。
+- `update_knowledge_entry`：修改现有知识内容，并自动退回 `candidate`、清除旧导读。
+- `upsert_watch_source`：新增或覆盖 GitHub Release / RSS 监测源。
+- `remove_watch_source`：从监测清单移除来源，不删除已经沉淀的知识。
 
 可以直接告诉 Codex：
 
 ```text
 读取 Agent Workbench，把来源改成 GitHub、技术博客和技术报告，
 每天 09:00 更新；立即运行一次采集，并告诉我有哪些候选知识需要复核。
+再关注 anthropics/anthropic-sdk-python 的 Release，归为 SDK，14 天复核；
+把这篇技术报告加入知识库，并将条目 abc 的工程影响改成适用于多 Agent 路由。
 完成后展示 git diff，但先不要替我推送。
 ```
+
+这些自然语言请求由本地 Codex 选择并调用上述 MCP 工具。来源和知识先写入个人 Fork 的 Git 工作副本；新增或编辑后的知识不能继承旧的可信状态，必须重新核验。用户查看差异后再决定是否提交并推送到自己的 GitHub。
 
 ## 知识新鲜度
 

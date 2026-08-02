@@ -3,7 +3,8 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const moduleRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+export const root = path.resolve(process.env.AGENT_WORKBENCH_REPOSITORY_ROOT || moduleRoot);
 const settingsPath = path.join(root, "workspace", "settings.json");
 const entriesPath = path.join(root, "knowledge", "entries.json");
 const watchlistPath = path.join(root, "watchlist", "sources.json");
@@ -27,11 +28,58 @@ const sourceTypes = new Set(["github", "blog", "report", "news", "web"]);
 const weekdays = new Set(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
 const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
 const weekdayIds = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+const sourceIdPattern = /^[a-z0-9][a-z0-9-]{1,63}$/;
 
 function clamp(value, minimum, maximum, fallback) {
   if (value === null || value === undefined || value === "") return fallback;
   const number = Number(value);
   return Number.isFinite(number) ? Math.min(maximum, Math.max(minimum, Math.round(number))) : fallback;
+}
+
+function httpUrl(value, field) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`${field} must be a valid URL`);
+  }
+  if (!["http:", "https:"].includes(url.protocol)) throw new Error(`${field} must use HTTP or HTTPS`);
+  return url.href;
+}
+
+function shortText(value, field, maximum = 160) {
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${field} is required`);
+  if (value.trim().length > maximum) throw new Error(`${field} is too long`);
+  return value.trim();
+}
+
+export function normalizeWatchSource(input) {
+  if (!input || typeof input !== "object") throw new Error("Source input must be an object");
+  const id = shortText(input.id, "id", 64).toLowerCase();
+  if (!sourceIdPattern.test(id)) throw new Error("id must use lowercase letters, numbers, and hyphens");
+  if (!["github-releases", "rss"].includes(input.adapter)) throw new Error("adapter must be github-releases or rss");
+  if (!sourceTypes.has(input.sourceType)) throw new Error("sourceType must be github, blog, report, news, or web");
+  const common = {
+    id,
+    adapter: input.adapter,
+    sourceType: input.sourceType,
+    category: shortText(input.category, "category", 60),
+    ttlDays: clamp(input.ttlDays, 1, 365, 21),
+  };
+  if (input.adapter === "github-releases") {
+    const repo = shortText(input.repo, "repo", 180);
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) throw new Error("repo must use owner/name format");
+    return { ...common, repo };
+  }
+  const keywords = Array.isArray(input.keywords)
+    ? [...new Set(input.keywords.filter((keyword) => typeof keyword === "string" && keyword.trim()).map((keyword) => keyword.trim()).slice(0, 20))]
+    : [];
+  return {
+    ...common,
+    name: shortText(input.name, "name", 120),
+    feedUrl: httpUrl(input.feedUrl, "feedUrl"),
+    keywords,
+  };
 }
 
 export function normalizeSettings(patch = {}, current = defaultSettings) {
@@ -75,6 +123,25 @@ export async function updateSettings(patch) {
   const next = normalizeSettings(patch, await readSettings());
   await writeJsonAtomic(settingsPath, next);
   return next;
+}
+
+export async function upsertWatchSource(input) {
+  const source = normalizeWatchSource(input);
+  const sources = await readJson(watchlistPath, []);
+  const existingIndex = sources.findIndex((item) => item?.id === source.id);
+  if (existingIndex === -1) sources.push(source);
+  else sources[existingIndex] = source;
+  await writeJsonAtomic(watchlistPath, sources);
+  return { source, created: existingIndex === -1 };
+}
+
+export async function removeWatchSource(id) {
+  const normalizedId = shortText(id, "id", 64).toLowerCase();
+  const sources = await readJson(watchlistPath, []);
+  const next = sources.filter((source) => source?.id !== normalizedId);
+  if (next.length === sources.length) throw new Error(`source not found: ${normalizedId}`);
+  await writeJsonAtomic(watchlistPath, next);
+  return { removed: normalizedId, remaining: next.length };
 }
 
 export async function getSnapshot() {
@@ -142,7 +209,7 @@ export async function proposeKnowledge(input) {
     confidence: "low",
     freshnessClass: input.freshnessClass === "slow" || input.freshnessClass === "medium" ? input.freshnessClass : "fast",
     source: input.source.trim(),
-    sourceUrl: input.sourceUrl.trim(),
+    sourceUrl: httpUrl(input.sourceUrl, "sourceUrl"),
     sourceVersion: typeof input.sourceVersion === "string" && input.sourceVersion.trim() ? input.sourceVersion.trim() : "unversioned",
     observedAt: now.toISOString(),
     lastVerifiedAt: "",
@@ -155,6 +222,50 @@ export async function proposeKnowledge(input) {
   entries.unshift(entry);
   await writeJsonAtomic(entriesPath, entries);
   return entry;
+}
+
+export async function updateKnowledge(id, patch) {
+  const normalizedId = shortText(id, "id", 180);
+  if (!patch || typeof patch !== "object") throw new Error("Knowledge patch must be an object");
+  const allowed = ["title", "category", "sourceType", "source", "sourceUrl", "sourceVersion", "summary", "impact", "tags", "action", "freshnessClass"];
+  const supplied = allowed.filter((field) => patch[field] !== undefined);
+  if (!supplied.length) throw new Error("At least one editable knowledge field is required");
+  const entries = await readJson(entriesPath, []);
+  const index = entries.findIndex((entry) => entry?.id === normalizedId);
+  if (index === -1) throw new Error(`knowledge entry not found: ${normalizedId}`);
+  const current = entries[index];
+  const next = { ...current };
+  for (const field of ["title", "category", "source", "sourceVersion", "summary", "impact", "action"]) {
+    if (patch[field] !== undefined) next[field] = shortText(patch[field], field, field === "summary" || field === "impact" ? 2_000 : 240);
+  }
+  if (patch.sourceType !== undefined) {
+    if (!sourceTypes.has(patch.sourceType)) throw new Error("sourceType must be github, blog, report, news, or web");
+    next.sourceType = patch.sourceType;
+  }
+  if (patch.sourceUrl !== undefined) next.sourceUrl = httpUrl(patch.sourceUrl, "sourceUrl");
+  if (patch.freshnessClass !== undefined) {
+    if (!["fast", "medium", "slow"].includes(patch.freshnessClass)) throw new Error("freshnessClass must be fast, medium, or slow");
+    next.freshnessClass = patch.freshnessClass;
+  }
+  if (patch.tags !== undefined) {
+    if (!Array.isArray(patch.tags)) throw new Error("tags must be an array");
+    next.tags = [...new Set(patch.tags.filter((tag) => typeof tag === "string" && tag.trim()).map((tag) => tag.trim()).slice(0, 12))];
+  }
+  const settings = await readSettings();
+  const now = new Date();
+  next.status = "candidate";
+  next.confidence = "low";
+  next.lastVerifiedAt = "";
+  next.observedAt = now.toISOString();
+  next.validUntil = new Date(now.getTime() + settings.defaultTtlDays * 86_400_000).toISOString().slice(0, 10);
+  entries[index] = next;
+  await writeJsonAtomic(entriesPath, entries);
+  const guides = await readJson(guidesPath, {});
+  if (guides[normalizedId]) {
+    delete guides[normalizedId];
+    await writeJsonAtomic(guidesPath, guides);
+  }
+  return next;
 }
 
 function runCodexStructured(prompt, schemaPath = agentSchemaPath, timeoutMs = 120_000, enableSearch = false) {
