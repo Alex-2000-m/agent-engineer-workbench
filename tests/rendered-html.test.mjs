@@ -23,5 +23,9 @@ test("server-renders the Agent Workbench", async () => {
   assert.match(html, /工作台设置/);
   assert.match(html, /知识库与导读/);
   assert.match(html, /让知识自己保持清醒/);
+  assert.match(html, /基础模式/);
+  assert.match(html, /来源摘录 · 未经 AI 提炼/);
+  assert.match(html, /启动本地 Bridge/);
+  assert.doesNotMatch(html, /内置导读/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/);
 });
