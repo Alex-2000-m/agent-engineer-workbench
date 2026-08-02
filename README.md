@@ -33,7 +33,7 @@ flowchart LR
   end
 
   subgraph Local[可选的本地能力]
-    Bridge[Local Bridge<br/>127.0.0.1 + 临时令牌]
+    Bridge[Local Bridge<br/>安全连接 + 个性化调度器]
     Core[(共享知识核心)]
     MCP[MCP Server<br/>stdio]
     CLI[Codex / MCP CLI]
@@ -44,6 +44,7 @@ flowchart LR
   Pages <--> Manual
   Pages <--> BYOK
   Pet --> BYOK --> Pages
+  Pet -->|无浏览器 Key 时复用 codex exec| Bridge
   Pages <-->|白名单 HTTP API| Bridge <--> Core
   CLI <-->|MCP tools| MCP <--> Core
   Core <--> Repo
@@ -89,7 +90,7 @@ AI 不能直接把知识标为 `verified`。新内容一律进入 `candidate`，
 | AI 导读和自动分类 | — | ✅ 自动执行 | 由本地 Agent 决定 |
 | 联网证据核验建议 | — | ✅ Web Search | 由本地 Agent/MCP 决定 |
 | 桌宠自然语言控制 | — | ✅ 在线模型 | ✅ 复用本地 Codex CLI |
-| 关闭网页后持续运行 | 仓库级 Actions | 仓库级 Actions | ✅ 本地进程/外部调度 |
+| 关闭网页后持续运行 | 仓库级 Actions | 仓库级 Actions | ✅ Bridge 按个人时间调度 |
 
 ## 一键连接本地 CLI
 
@@ -102,7 +103,7 @@ npm install
 npm run workbench:bridge
 ```
 
-Bridge 启动后会打印一个包含临时令牌的一键连接链接。打开该链接即可让在线网站读取本地知识；令牌只存在于进程内存和 URL fragment，不会发给 GitHub Pages 服务器，也不会写入磁盘。保持终端运行即可维持连接。
+Bridge 启动后会打印一个包含临时令牌的一键连接链接。打开该链接即可让在线网站读取本地知识；令牌只存在于进程内存和 URL fragment，不会发给 GitHub Pages 服务器，也不会写入磁盘。保持终端运行即可维持连接，并按用户设置的每日采集、每周复核和每月归档时间自动执行任务（使用本机时区）。
 
 将同一知识核心注册给 Codex：
 

@@ -1,13 +1,37 @@
 #!/usr/bin/env node
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
-import { getSnapshot, runLocalAgent, runRoutine, updateSettings } from "./workbench-core.mjs";
+import { getDueRoutines, getSnapshot, readSettings, runLocalAgent, runRoutine, updateSettings } from "./workbench-core.mjs";
 
 const host = "127.0.0.1";
 const port = Number(process.env.WORKBENCH_BRIDGE_PORT || 4317);
 const token = process.env.WORKBENCH_BRIDGE_TOKEN || randomBytes(24).toString("base64url");
 const productionOrigin = "https://alex-2000-m.github.io";
 const siteUrl = process.env.WORKBENCH_SITE_URL || `${productionOrigin}/agent-engineer-workbench/`;
+const scheduledRuns = new Set();
+const runningRoutines = new Set();
+
+async function runScheduledRoutine(routine, key) {
+  if (scheduledRuns.has(key) || runningRoutines.has(routine)) return;
+  scheduledRuns.add(key);
+  runningRoutines.add(routine);
+  try {
+    const result = await runRoutine(routine);
+    process.stdout.write(`[scheduler] ${result.stdout || `${routine} completed`}\n`);
+  } catch (error) {
+    process.stderr.write(`[scheduler] ${error instanceof Error ? error.message : String(error)}\n`);
+  } finally {
+    runningRoutines.delete(routine);
+  }
+}
+
+async function tickScheduler() {
+  const settings = await readSettings();
+  const now = new Date();
+  const date = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
+  for (const routine of getDueRoutines(settings, now)) void runScheduledRoutine(routine, `${date}:${routine}`);
+  for (const key of scheduledRuns) if (!key.startsWith(date)) scheduledRuns.delete(key);
+}
 
 function allowedOrigin(origin = "") {
   return origin === productionOrigin || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
@@ -55,7 +79,7 @@ const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url ?? "/", `http://${host}:${port}`);
     if (request.method === "GET" && url.pathname === "/health") {
-      return respond(response, 200, { ok: true, service: "agent-workbench-bridge", version: 1 }, origin);
+      return respond(response, 200, { ok: true, service: "agent-workbench-bridge", version: 1, scheduler: "active" }, origin);
     }
     if (request.method === "GET" && url.pathname === "/snapshot") {
       return respond(response, 200, await getSnapshot(), origin);
@@ -79,5 +103,8 @@ const server = createServer(async (request, response) => {
 
 server.listen(port, host, () => {
   const fragment = new URLSearchParams({ bridge: `http://${host}:${port}`, token });
-  process.stdout.write(`Agent Workbench local bridge is ready.\n\nBridge: http://${host}:${port}\nToken:  ${token}\nOpen:   ${siteUrl}#${fragment}\n\nKeep this terminal open. The token is temporary and is never written to disk.\n`);
+  process.stdout.write(`Agent Workbench local bridge is ready.\n\nBridge: http://${host}:${port}\nToken:  ${token}\nOpen:   ${siteUrl}#${fragment}\n\nKeep this terminal open. The local scheduler is active; the token is temporary and is never written to disk.\n`);
 });
+
+void tickScheduler();
+setInterval(() => void tickScheduler().catch((error) => process.stderr.write(`[scheduler] ${error.message}\n`)), 15_000).unref();

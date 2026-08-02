@@ -25,6 +25,7 @@ export const defaultSettings = {
 const sourceTypes = new Set(["github", "blog", "report", "news", "web"]);
 const weekdays = new Set(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
 const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
+const weekdayIds = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
 function clamp(value, minimum, maximum, fallback) {
   if (value === null || value === undefined || value === "") return fallback;
@@ -82,6 +83,15 @@ export async function getSnapshot() {
     readSettings(),
   ]);
   return { version: 1, updatedAt: new Date().toISOString(), entries, sources, settings };
+}
+
+export function getDueRoutines(settings, now = new Date()) {
+  const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const due = [];
+  if (time === settings.radarTime) due.push("sync");
+  if (weekdayIds[now.getDay()] === settings.auditDay && time === settings.auditTime) due.push("audit");
+  if (now.getDate() === settings.gcDay && time === settings.gcTime) due.push("gc");
+  return due;
 }
 
 const routines = { sync: "sync-radar.mjs", audit: "check-freshness.mjs", gc: "knowledge-gc.mjs" };
