@@ -16,17 +16,26 @@ const dryRun = process.env.DRY_RUN === "1";
 const discovered = [];
 
 function decodeXml(value = "") {
-  return value
-    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'")
+  const decodeEntities = (text) => text
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(Number.parseInt(code, 16)))
     .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
-    .replace(/\s+/g, " ")
-    .trim();
+    .replace(/&amp;/gi, "&");
+
+  let text = value.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1");
+  // Feeds such as Google News HTML-encode their description markup. Decode
+  // before stripping tags, then repeat once for doubly encoded fragments.
+  for (let pass = 0; pass < 2; pass += 1) {
+    text = decodeEntities(text)
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ");
+  }
+  return decodeEntities(text).replace(/<[^>]+>/g, " ").replace(/\\n|\s+/g, " ").trim();
 }
 
 function tag(block, names) {

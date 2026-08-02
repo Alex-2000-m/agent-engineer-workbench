@@ -19,7 +19,7 @@ test("server-renders a focused Dashboard", async () => {
   assert.match(html, /<title>Agent Workbench/);
   assert.match(html, /rel="icon"[^>]+type="image\/png"/);
   assert.match(html, /Dashboard/);
-  assert.match(html, /你的知识库还是空的/);
+  assert.match(html, /你的知识库还是空的|来源摘录 · 未经 AI 提炼/);
   assert.match(html, /GitHub 基础模式/);
   assert.doesNotMatch(html, /五路信号，分开判断|知识库与导读|让知识自己保持清醒/);
   assert.doesNotMatch(html, /type="password"|Responses API 地址/);
