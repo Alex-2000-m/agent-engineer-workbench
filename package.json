@@ -2,6 +2,10 @@
   "name": "agent-engineer-workbench",
   "version": "0.1.0",
   "private": true,
+  "bin": {
+    "agent-workbench-install": "scripts/workbench-install.mjs",
+    "agent-workbench-mcp": "scripts/workbench-mcp.mjs"
+  },
   "engines": {
     "node": ">=22.13.0"
   },

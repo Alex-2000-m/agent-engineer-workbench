@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { defaultSettings, getDueRoutines, getSnapshot, normalizeSettings } from "../scripts/workbench-core.mjs";
+import { defaultSettings, getDueRoutines, getSnapshot, normalizeSettings, runLocalEnhancement } from "../scripts/workbench-core.mjs";
 
 test("normalizes local Agent patches without letting null values erase policy", () => {
   const normalized = normalizeSettings({
@@ -28,4 +28,9 @@ test("local scheduler honors personal daily, weekly, and monthly times", () => {
   const due = getDueRoutines(settings, new Date(2026, 7, 2, 9, 0));
   assert.deepEqual(due, ["sync", "audit", "gc"]);
   assert.deepEqual(getDueRoutines(settings, new Date(2026, 7, 2, 9, 1)), []);
+});
+
+test("local enhancement rejects missing hosted knowledge before invoking Codex", async () => {
+  await assert.rejects(runLocalEnhancement([]), /between 1 and 20/);
+  await assert.rejects(runLocalEnhancement([{ id: "incomplete" }]), /title is required/);
 });

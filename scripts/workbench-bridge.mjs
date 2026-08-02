@@ -1,15 +1,16 @@
 #!/usr/bin/env node
-import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
-import { getDueRoutines, getSnapshot, readSettings, runLocalAgent, runRoutine, updateSettings } from "./workbench-core.mjs";
+import { getDueRoutines, getSnapshot, readSettings, runLocalAgent, runLocalEnhancement, runRoutine, updateSettings } from "./workbench-core.mjs";
 
 const host = "127.0.0.1";
 const port = Number(process.env.WORKBENCH_BRIDGE_PORT || 4317);
-const token = process.env.WORKBENCH_BRIDGE_TOKEN || randomBytes(24).toString("base64url");
 const productionOrigin = "https://alex-2000-m.github.io";
 const siteUrl = process.env.WORKBENCH_SITE_URL || `${productionOrigin}/agent-engineer-workbench/`;
 const scheduledRuns = new Set();
 const runningRoutines = new Set();
+const connectionLeaseMs = Number(process.env.WORKBENCH_CONNECTION_LEASE_MS || 30_000);
+let lastSeenAt = Date.now();
+let shuttingDown = false;
 
 async function runScheduledRoutine(routine, key) {
   if (scheduledRuns.has(key) || runningRoutines.has(routine)) return;
@@ -37,21 +38,15 @@ function allowedOrigin(origin = "") {
   return origin === productionOrigin || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
 }
 
-function authorized(request) {
-  const supplied = request.headers.authorization?.replace(/^Bearer\s+/i, "") ?? "";
-  const left = Buffer.from(supplied);
-  const right = Buffer.from(token);
-  return left.length === right.length && timingSafeEqual(left, right);
-}
-
 function respond(response, status, body, origin) {
   response.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
     ...(allowedOrigin(origin) ? {
       "Access-Control-Allow-Origin": origin,
-      "Access-Control-Allow-Headers": "Authorization, Content-Type",
+      "Access-Control-Allow-Headers": "Content-Type",
       "Access-Control-Allow-Methods": "GET, PATCH, POST, OPTIONS",
+      "Access-Control-Allow-Private-Network": "true",
       Vary: "Origin",
     } : {}),
   });
@@ -74,7 +69,7 @@ const server = createServer(async (request, response) => {
     return respond(response, 204, {}, origin);
   }
   if (!allowedOrigin(origin)) return respond(response, 403, { error: "Origin not allowed" }, origin);
-  if (!authorized(request)) return respond(response, 401, { error: "Invalid bridge token" }, origin);
+  lastSeenAt = Date.now();
 
   try {
     const url = new URL(request.url ?? "/", `http://${host}:${port}`);
@@ -91,6 +86,15 @@ const server = createServer(async (request, response) => {
       const body = await readBody(request);
       return respond(response, 200, await runLocalAgent(body.message), origin);
     }
+    if (request.method === "POST" && url.pathname === "/enhance") {
+      const body = await readBody(request);
+      return respond(response, 200, await runLocalEnhancement(body.entries), origin);
+    }
+    if (request.method === "POST" && url.pathname === "/disconnect") {
+      respond(response, 200, { ok: true, disconnected: true }, origin);
+      setTimeout(() => shutdown("explicit disconnect"), 100);
+      return;
+    }
     const routine = url.pathname.match(/^\/actions\/(sync|audit|gc)$/)?.[1];
     if (request.method === "POST" && routine) {
       return respond(response, 200, { result: await runRoutine(routine), snapshot: await getSnapshot() }, origin);
@@ -102,9 +106,20 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(port, host, () => {
-  const fragment = new URLSearchParams({ bridge: `http://${host}:${port}`, token });
-  process.stdout.write(`Agent Workbench local bridge is ready.\n\nBridge: http://${host}:${port}\nToken:  ${token}\nOpen:   ${siteUrl}#${fragment}\n\nKeep this terminal open. The local scheduler is active; the token is temporary and is never written to disk.\n`);
+  const fragment = new URLSearchParams({ bridge: `http://${host}:${port}` });
+  process.stdout.write(`Agent Workbench local bridge is ready.\n\nBridge: http://${host}:${port}\nOpen:   ${siteUrl}#${fragment}\n\nThe connection closes automatically after the website heartbeat stops.\n`);
 });
+
+function shutdown(reason) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  process.stdout.write(`[bridge] shutting down: ${reason}\n`);
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 2_000).unref();
+}
 
 void tickScheduler();
 setInterval(() => void tickScheduler().catch((error) => process.stderr.write(`[scheduler] ${error.message}\n`)), 15_000).unref();
+setInterval(() => {
+  if (Date.now() - lastSeenAt > connectionLeaseMs) shutdown("website heartbeat expired");
+}, 5_000).unref();
