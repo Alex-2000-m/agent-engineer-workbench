@@ -2,10 +2,13 @@
 
 一个由 GitHub 托管的 Agent 工程知识工作台：发现最新变化、保留证据、安排复现，并让陈旧知识及时退出默认检索。
 
+网站同时提供内置导读和可选的用户自带模型（BYOK）。即使不配置 API Key，也可以手动调整来源类别、个人定时计划和知识过期策略。
+
 ## 核心机制
 
 - `knowledge/entries.json` 是网站的知识事实源。
-- `watchlist/sources.json` 定义需要跟踪的 Agent 工程仓库。
+- `watchlist/sources.json` 定义 GitHub Release 与 RSS/Atom 来源。
+- 来源分为 GitHub、技术博客、技术报告、新闻和其他网络知识，统一进入候选知识结构。
 - 每日雷达只写入 `candidate`，不会自动升级为可信知识。
 - 每周审计依据 `validUntil` 将内容降级为 `review` 或 `stale`。
 - 每月 GC 将长期过期内容改为 `archived`，保留审计历史。
@@ -17,6 +20,16 @@
 candidate → verified → adopted → review → stale → archived
                      ↘ quarantined
 ```
+
+## 个人工作台与 AI 桌宠
+
+- 来源开关、每日雷达时间、每周复核时间、每月归档时间和过期阈值保存在当前设备。
+- API Key 只保存在当前页面内存中，刷新即清除，不写入浏览器持久存储、仓库或日志。
+- 配置 Key 后会出现 Workbench Agent 桌宠，可以用自然语言修改来源、计划和知识策略。
+- 每条知识始终展示内置导读；配置模型后可以通过 Responses API 重新提炼。
+- AI 只负责压缩和配置建议，不能自动把 `candidate` 升级为 `verified`。
+
+GitHub Pages 是静态网站。个人计划只影响当前设备上的工作台；关闭页面后的后台调度仍由仓库级 GitHub Actions 管理。若要让每位用户拥有独立的持续后台任务，需要增加账户系统和服务端调度。
 
 ## 本地运行
 
@@ -42,7 +55,7 @@ npm run knowledge:audit
 npm run knowledge:gc
 ```
 
-首次同步 GitHub Release 时，可通过 `GITHUB_TOKEN` 提高 API 限额。不要将 Token 写入仓库。
+首次同步 GitHub Release 时，可通过 `GITHUB_TOKEN` 提高 API 限额。不要将 Token 写入仓库。使用 `DRY_RUN=1` 可以只检查多来源发现结果而不修改知识文件。
 
 ## GitHub Pages
 
