@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { requestGuide, requestWorkspaceUpdate, type Guide, type WorkspacePatch } from "./ai-guide";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type Guide, type WorkspacePatch } from "./ai-guide";
 
 type KnowledgeStatus = "verified" | "candidate" | "review" | "stale" | "archived" | "quarantined";
 type SourceType = "github" | "blog" | "report" | "news" | "web";
@@ -20,8 +20,8 @@ type WorkspaceSettings = {
 
 type BridgeSnapshot = {
   updatedAt: string;
-  entries: KnowledgeEntry[];
   settings: WorkspaceSettings;
+  guides?: Record<string, Guide & { sourceVersion?: string }>;
 };
 
 const defaultWorkspaceSettings: WorkspaceSettings = {
@@ -112,7 +112,7 @@ function GuidePanel({
         <p>{entry.summary}</p>
         <div className="non-ai-note">仅按过期规则整理，等待人工复核；这不是 AI 导读或事实核验结论。</div>
         <button type="button" className="guide-button" onClick={onGenerate} disabled={loading}>
-          {loading ? "正在提炼与核验…" : aiEnabled ? "运行 AI 增强" : "配置 AI 获取导读与核验"} <span>✦</span>
+          {loading ? "正在提炼与核验…" : aiEnabled ? "运行本地 AI 增强" : "安装本地 MCP 获取 AI 导读"} <span>✦</span>
         </button>
       </div>
     );
@@ -176,16 +176,12 @@ function applyFreshnessPolicy(entry: KnowledgeEntry, settings: WorkspaceSettings
 }
 
 export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
-  const [knowledgeEntries, setKnowledgeEntries] = useState(entries);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | KnowledgeStatus>("all");
   const [sourceFilter, setSourceFilter] = useState<"all" | SourceType>("all");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [workspace, setWorkspace] = useState(defaultWorkspaceSettings);
   const [workspaceLoaded, setWorkspaceLoaded] = useState(false);
-  const [apiKey, setApiKey] = useState("");
-  const [model, setModel] = useState("gpt-5.6-sol");
-  const [endpoint, setEndpoint] = useState("https://api.openai.com/v1/responses");
   const [guides, setGuides] = useState<Record<string, Guide>>({});
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [autoProgress, setAutoProgress] = useState<{ done: number; total: number } | null>(null);
@@ -194,14 +190,27 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
   const [petInput, setPetInput] = useState("");
   const [petLoading, setPetLoading] = useState(false);
   const [bridgeUrl, setBridgeUrl] = useState("http://127.0.0.1:4317");
-  const [bridgeToken, setBridgeToken] = useState("");
   const [bridgeStatus, setBridgeStatus] = useState<"disconnected" | "connecting" | "connected" | "error">("disconnected");
   const [bridgeUpdatedAt, setBridgeUpdatedAt] = useState("");
   const [bridgeRoutine, setBridgeRoutine] = useState<string | null>(null);
+  const [copiedCommand, setCopiedCommand] = useState(false);
   const [petMessages, setPetMessages] = useState<Array<{ role: "agent" | "user"; text: string }>>([
     { role: "agent", text: "我是你的工作台 Agent。告诉我想关注哪些来源、几点更新，或知识多久复核一次。" },
   ]);
+  const attemptedInitialConnection = useRef(false);
   const repositoryUrl = process.env.NEXT_PUBLIC_REPOSITORY_URL ?? "https://github.com";
+  const aiEnabled = bridgeStatus === "connected";
+  const installCommand = "sh -c 'D=\"$HOME/.agent-engineer-workbench\"; if [ -d \"$D/.git\" ]; then git -C \"$D\" pull --ff-only; else git clone https://github.com/Alex-2000-m/agent-engineer-workbench.git \"$D\"; fi; npm --prefix \"$D\" install && node \"$D/scripts/workbench-install.mjs\"'";
+
+  const copyInstallCommand = async () => {
+    try {
+      await navigator.clipboard.writeText(installCommand);
+      setCopiedCommand(true);
+      window.setTimeout(() => setCopiedCommand(false), 2_000);
+    } catch {
+      setNotice("浏览器无法访问剪贴板，请手动选择命令复制。");
+    }
+  };
 
   useEffect(() => {
     try {
@@ -218,7 +227,7 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
     if (workspaceLoaded) window.localStorage.setItem("agent-workbench-settings-v1", JSON.stringify(workspace));
   }, [workspace, workspaceLoaded]);
 
-  const bridgeRequest = useCallback(async (path: string, init?: RequestInit, connection?: { url: string; token: string }) => {
+  const bridgeRequest = useCallback(async (path: string, init?: RequestInit, connection?: { url: string }) => {
     const url = new URL(connection?.url ?? bridgeUrl);
     if (url.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(url.hostname)) {
       throw new Error("本地 Bridge 只允许 http://127.0.0.1 或 http://localhost");
@@ -227,7 +236,6 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
       ...init,
       cache: "no-store",
       headers: {
-        Authorization: `Bearer ${(connection?.token ?? bridgeToken).trim()}`,
         "Content-Type": "application/json",
         ...init?.headers,
       },
@@ -235,43 +243,73 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
     const payload = await response.json().catch(() => ({})) as { error?: string };
     if (!response.ok) throw new Error(payload.error || `Bridge 返回 ${response.status}`);
     return payload;
-  }, [bridgeToken, bridgeUrl]);
+  }, [bridgeUrl]);
 
   const applyBridgeSnapshot = useCallback((snapshot: BridgeSnapshot) => {
-    if (Array.isArray(snapshot.entries)) setKnowledgeEntries(snapshot.entries);
     if (snapshot.settings) setWorkspace((current) => applyWorkspacePatch(current, snapshot.settings));
-    setBridgeUpdatedAt(snapshot.updatedAt || new Date().toISOString());
-  }, []);
-
-  const connectBridge = useCallback(async (connection?: { url: string; token: string }, quiet = false) => {
-    const nextUrl = connection?.url ?? bridgeUrl;
-    const nextToken = connection?.token ?? bridgeToken;
-    if (!nextToken.trim()) {
-      if (!quiet) setNotice("请粘贴 Bridge 启动时显示的临时 Token。");
-      return;
+    if (snapshot.guides) {
+      const hostedVersions = new Map(entries.map((entry) => [entry.id, entry.sourceVersion]));
+      const compatible = Object.fromEntries(Object.entries(snapshot.guides).filter(([id, guide]) => (
+        hostedVersions.has(id) && (!guide.sourceVersion || guide.sourceVersion === hostedVersions.get(id))
+      )));
+      setGuides((current) => ({ ...current, ...compatible }));
     }
+    setBridgeUpdatedAt(snapshot.updatedAt || new Date().toISOString());
+  }, [entries]);
+
+  const enhanceLocally = useCallback(async (targets: KnowledgeEntry[], connection?: { url: string }) => {
+    if (!targets.length) return;
+    setAutoProgress({ done: 0, total: targets.length });
+    try {
+      const result = await bridgeRequest("/enhance", {
+        method: "POST",
+        body: JSON.stringify({ entries: targets }),
+      }, connection) as { guides?: Record<string, Guide>; snapshot?: BridgeSnapshot };
+      if (result.guides) setGuides((current) => ({ ...current, ...result.guides }));
+      if (result.snapshot) applyBridgeSnapshot(result.snapshot);
+      setAutoProgress({ done: targets.length, total: targets.length });
+      setNotice(`本地 CLI 已完成 ${Object.keys(result.guides ?? {}).length} 条导读、分类与证据核验。`);
+    } finally {
+      setAutoProgress(null);
+    }
+  }, [applyBridgeSnapshot, bridgeRequest]);
+
+  const connectBridge = useCallback(async (connection?: { url: string }, quiet = false) => {
+    const nextUrl = connection?.url ?? bridgeUrl;
     if (!quiet) setBridgeStatus("connecting");
     try {
-      await bridgeRequest("/health", undefined, { url: nextUrl, token: nextToken });
-      const snapshot = await bridgeRequest("/snapshot", undefined, { url: nextUrl, token: nextToken }) as BridgeSnapshot;
+      await bridgeRequest("/health", undefined, { url: nextUrl });
+      const snapshot = await bridgeRequest("/snapshot", undefined, { url: nextUrl }) as BridgeSnapshot;
       setBridgeUrl(nextUrl);
-      setBridgeToken(nextToken);
+      window.sessionStorage.setItem("agent-workbench-local-url", nextUrl);
       applyBridgeSnapshot(snapshot);
       setBridgeStatus("connected");
-      if (!quiet) setNotice("本地 CLI / MCP 已连接，网站正在读取本地知识核心。");
+      if (!quiet) setNotice("本地 CLI 已连接。网站知识仍来自 GitHub，本地 CLI 正在提供 AI 增强与控制能力。");
+      const cached = snapshot.guides ?? {};
+      const targets = entries.filter((entry) => entry.status !== "archived" && !(
+        cached[entry.id] && (!cached[entry.id].sourceVersion || cached[entry.id].sourceVersion === entry.sourceVersion)
+      ));
+      if (targets.length) void enhanceLocally(targets.slice(0, 20), { url: nextUrl }).catch((error) => {
+        setNotice(error instanceof Error ? error.message : "本地 AI 自动增强失败");
+      });
     } catch (error) {
       setBridgeStatus("error");
-      if (!quiet) setNotice(error instanceof Error ? error.message : "无法连接本地 Bridge");
+      if (!quiet) setNotice(error instanceof Error ? `${error.message}；若浏览器询问本地网络访问，请选择允许。` : "无法连接本地服务；若浏览器询问本地网络访问，请选择允许。");
     }
-  }, [applyBridgeSnapshot, bridgeRequest, bridgeToken, bridgeUrl]);
+  }, [applyBridgeSnapshot, bridgeRequest, bridgeUrl, enhanceLocally, entries]);
 
   useEffect(() => {
+    if (attemptedInitialConnection.current) return;
+    attemptedInitialConnection.current = true;
     const params = new URLSearchParams(window.location.hash.slice(1));
     const url = params.get("bridge");
-    const token = params.get("token");
-    if (!url || !token) return;
-    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
-    void connectBridge({ url, token });
+    if (url) {
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+      void connectBridge({ url });
+      return;
+    }
+    const savedUrl = window.sessionStorage.getItem("agent-workbench-local-url");
+    if (savedUrl) void connectBridge({ url: savedUrl }, true);
   }, [connectBridge]);
 
   useEffect(() => {
@@ -282,12 +320,13 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
         applyBridgeSnapshot(snapshot);
       } catch {
         setBridgeStatus("error");
+        window.sessionStorage.removeItem("agent-workbench-local-url");
       }
     }, 5_000);
     return () => window.clearInterval(timer);
   }, [applyBridgeSnapshot, bridgeRequest, bridgeStatus]);
 
-  const policyEntries = knowledgeEntries.map((entry) => applyFreshnessPolicy(entry, workspace));
+  const policyEntries = entries.map((entry) => applyFreshnessPolicy(entry, workspace));
   const activeEntries = policyEntries.filter((entry) => entry.status !== "archived" && workspace.enabledSources.includes(entry.sourceType));
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -304,52 +343,37 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
   const verified = activeEntries.filter((entry) => entry.status === "verified").length;
   const review = activeEntries.filter((entry) => entry.status === "review").length;
   const stale = activeEntries.filter((entry) => entry.status === "stale").length;
-  const health = Math.round((verified / Math.max(activeEntries.length, 1)) * 100);
   const radar = activeEntries.slice(0, 3);
 
   const generateGuide = async (entry: KnowledgeEntry) => {
-    if (!apiKey.trim()) {
-      setNotice("先配置 API Key，再生成个性化导读。");
-      setSettingsOpen(true);
+    if (bridgeStatus !== "connected") {
+      setNotice("请先运行首页的一键安装命令，再生成导读、分类和证据核验。");
+      document.getElementById("quickstart")?.scrollIntoView({ behavior: "smooth" });
       return;
     }
     setLoadingId(entry.id);
     setNotice("");
     try {
-      const guide = await requestGuide(entry, { apiKey, endpoint, model });
-      setGuides((current) => ({ ...current, [entry.id]: guide }));
+      await enhanceLocally([entry]);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "导读生成失败");
-      setSettingsOpen(true);
+      setNotice(error instanceof Error ? error.message : "知识增强失败");
     } finally {
       setLoadingId(null);
     }
   };
 
   const runAutoEnhance = async () => {
-    if (!apiKey.trim() || autoProgress) return;
+    if (bridgeStatus !== "connected" || autoProgress) return;
     const targets = activeEntries.filter((entry) => !guides[entry.id]);
     if (!targets.length) {
       setNotice("当前活跃知识都已完成 AI 增强。");
       return;
     }
-    setAutoProgress({ done: 0, total: targets.length });
-    setNotice("");
-    let failures = 0;
-    for (let index = 0; index < targets.length; index += 1) {
-      const entry = targets[index];
-      setLoadingId(entry.id);
-      try {
-        const guide = await requestGuide(entry, { apiKey, endpoint, model });
-        setGuides((current) => ({ ...current, [entry.id]: guide }));
-      } catch {
-        failures += 1;
-      }
-      setAutoProgress({ done: index + 1, total: targets.length });
+    try {
+      await enhanceLocally(targets.slice(0, 20));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "本地 AI 自动增强失败");
     }
-    setLoadingId(null);
-    setAutoProgress(null);
-    setNotice(failures ? `AI 增强完成，${targets.length - failures} 条成功、${failures} 条需重试。` : `AI 增强完成：${targets.length} 条已提炼、分类并核验。`);
   };
 
   const saveSettings = async () => {
@@ -363,7 +387,7 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
       }
     }
     setSettingsOpen(false);
-    if (apiKey.trim()) void runAutoEnhance();
+    if (bridgeStatus === "connected") void runAutoEnhance();
   };
 
   const runBridgeRoutine = async (routine: "sync" | "audit" | "gc") => {
@@ -373,12 +397,25 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
     try {
       const result = await bridgeRequest(`/actions/${routine}`, { method: "POST" }) as { snapshot?: BridgeSnapshot };
       if (result.snapshot) applyBridgeSnapshot(result.snapshot);
-      setNotice(`${routine.toUpperCase()} 已由本地 CLI Bridge 执行完成。`);
+      setNotice(`${routine.toUpperCase()} 已由本地 CLI 执行完成。`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "本地任务执行失败");
     } finally {
       setBridgeRoutine(null);
     }
+  };
+
+  const disconnectLocal = async () => {
+    try {
+      await bridgeRequest("/disconnect", { method: "POST" });
+    } catch {
+      // Clear the browser-side capability even if the local process already stopped.
+    }
+    setBridgeStatus("disconnected");
+    window.sessionStorage.removeItem("agent-workbench-local-url");
+    setBridgeUrl("http://127.0.0.1:4317");
+    setPetOpen(false);
+    setNotice("本地连接已安全断开，本地服务已经停止。");
   };
 
   const chooseSource = (source: SourceType) => {
@@ -410,15 +447,9 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
     setPetInput("");
     setPetLoading(true);
     try {
-      if (bridgeStatus === "connected") {
-        const result = await bridgeRequest("/agent", { method: "POST", body: JSON.stringify({ message }) }) as { reply: string; snapshot?: BridgeSnapshot };
-        if (result.snapshot) applyBridgeSnapshot(result.snapshot);
-        setPetMessages((current) => [...current, { role: "agent", text: result.reply }]);
-      } else {
-        const result = await requestWorkspaceUpdate(workspace, message, { apiKey, endpoint, model });
-        if (result.patch) setWorkspace((current) => applyWorkspacePatch(current, result.patch));
-        setPetMessages((current) => [...current, { role: "agent", text: result.reply }]);
-      }
+      const result = await bridgeRequest("/agent", { method: "POST", body: JSON.stringify({ message }) }) as { reply: string; snapshot?: BridgeSnapshot };
+      if (result.snapshot) applyBridgeSnapshot(result.snapshot);
+      setPetMessages((current) => [...current, { role: "agent", text: result.reply }]);
     } catch (error) {
       setPetMessages((current) => [...current, { role: "agent", text: error instanceof Error ? error.message : "我暂时没能完成设置。" }]);
     } finally {
@@ -434,54 +465,56 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
           <span>Agent Workbench</span>
         </a>
         <nav aria-label="主导航">
+          <a href="#quickstart">快速开始</a>
           <a href="#radar">今日雷达</a>
           <a href="#sources">来源</a>
           <a href="#knowledge">知识库</a>
           <a href="#workflow">工作流</a>
         </nav>
         <div className="header-actions">
-          <button type="button" className={`ai-config-button${apiKey ? " configured" : ""}`} onClick={() => setSettingsOpen(true)}>
-            <span>{apiKey ? "✦" : "⚙"}</span>{apiKey ? model : "工作台设置"}
+          <button type="button" className={`ai-config-button${aiEnabled ? " configured" : ""}`} onClick={() => aiEnabled ? setSettingsOpen(true) : document.getElementById("quickstart")?.scrollIntoView({ behavior: "smooth" })}>
+            <span>{aiEnabled ? "●" : "○"}</span>{aiEnabled ? "Local CLI 已连接" : "连接本地 CLI"}
           </button>
           <div className={`sync-pill${bridgeStatus === "connected" ? " bridge-live" : ""}`}><span />{bridgeStatus === "connected" ? "LOCAL MCP · LIVE" : `个人雷达 ${workspace.radarTime}`}</div>
         </div>
       </header>
 
-      <div className={`mode-strip ${apiKey ? "ai-mode" : "basic-mode"}`}>
-        <strong>{apiKey ? "AI 增强模式" : "基础模式"}</strong>
-        <span>{apiKey ? "自动导读 · 自动分类 · 联网证据核验" : "自动采集 · 过期整理 · 人工复核"}</span>
+      <div className={`mode-strip ${aiEnabled ? "ai-mode" : "basic-mode"}`}>
+        <strong>{aiEnabled ? "本地 CLI AI 模式" : "GitHub 基础模式"}</strong>
+        <span>{aiEnabled ? "自动导读 · 自动分类 · 联网证据核验" : "公开知识 · 过期规则 · 等待本地 CLI"}</span>
         {autoProgress && <span className="mode-progress">正在增强 {autoProgress.done}/{autoProgress.total}</span>}
         {bridgeStatus === "connected" && <span className="bridge-indicator">本地 CLI 正在驱动 · {bridgeUpdatedAt ? new Date(bridgeUpdatedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "已连接"}</span>}
         {notice && !settingsOpen && <button type="button" onClick={() => setNotice("")} aria-label="关闭通知">{notice} ×</button>}
       </div>
 
-      <section className="hero" id="top">
+      <section className="hero quickstart-hero" id="quickstart">
         <div className="hero-copy">
-          <p className="eyebrow">AGENT ENGINEERING INTELLIGENCE</p>
-          <h1>不打开十个页面，<br /><em>也能看懂变化。</em></h1>
-          <p className="hero-lede">{apiKey
-            ? "聚合 GitHub、技术博客、技术报告、新闻与网络知识，由 AI 自动提炼、分类并联网核验；最终仍由证据和人工审核决定是否采信。"
-            : "聚合 GitHub、技术博客、技术报告、新闻与网络知识。未配置 API Key 时保留来源摘录，按过期策略整理并交给人工复核。"}</p>
+          <p className="eyebrow">QUICK START · LOCAL FIRST</p>
+          <h1>3 分钟连接<br /><em>本地 CLI。</em></h1>
+          <p className="hero-lede">网站不接收 API Key。运行一条安装命令后，MCP 注册、本地连接和打开网站全部自动完成；导读、自动分类、联网证据核验和桌宠对话均使用你已登录的本机 CLI。</p>
+          <div className="quickstart-status">
+            <span className={aiEnabled ? "ready" : "waiting"} />
+            <div><strong>{aiEnabled ? "本地能力已就绪" : "等待本地 CLI"}</strong><small>{aiEnabled ? "正在使用 Local Codex CLI" : "先复制右侧的一键安装命令"}</small></div>
+          </div>
           <div className="hero-actions">
-            <a className="primary-button" href="#radar">阅读今日导读 <span>↘</span></a>
-            <button type="button" className="text-button" onClick={() => setSettingsOpen(true)}>配置我的工作台 <span>→</span></button>
+            <button type="button" className="primary-button" onClick={() => void copyInstallCommand()}>{copiedCommand ? "已复制安装命令" : "复制一键安装命令"} <span>{copiedCommand ? "✓" : "↗"}</span></button>
+            <a className="text-button" href="#workflow">查看它能控制什么 <span>→</span></a>
           </div>
         </div>
 
-        <div className="signal-board" aria-label="知识雷达摘要">
-          <div className="board-topline">
-            <span>MULTI-SOURCE KNOWLEDGE GRAPH</span>
-            <span className="live-dot">LIVE</span>
+        <div className="quickstart-console" aria-label="本地 CLI 快速开始">
+          <div className="console-topline"><span>LOCAL SETUP</span><span className={aiEnabled ? "connected" : "idle"}>{aiEnabled ? "CONNECTED" : "3 STEPS"}</span></div>
+          <div className="setup-step">
+            <span>01</span><div><strong>安装并注册 MCP</strong><p>整行复制到终端执行。</p><code>{installCommand}</code></div>
+            <button type="button" onClick={() => void copyInstallCommand()}>{copiedCommand ? "已复制" : "复制"}</button>
           </div>
-          <div className="orbit orbit-one" />
-          <div className="orbit orbit-two" />
-          <div className="orbit orbit-three" />
-          <div className="signal-core"><strong>{health}%</strong><span>知识健康度</span></div>
-          <span className="node node-a">GIT</span>
-          <span className="node node-b">BLOG</span>
-          <span className="node node-c">NEWS</span>
-          <span className="node node-d">PAPER</span>
-          <div className="board-caption"><span>{activeEntries.length} 条活跃知识</span><span>5 类来源</span></div>
+          <div className="setup-step">
+            <span>02</span><div><strong>CLI 自动完成配置</strong><p>命令会安装依赖、注册 MCP，并在后台启动仅监听本机的安全连接。</p></div>
+          </div>
+          <div className="setup-step">
+            <span>03</span><div><strong>网站自动打开并连接</strong><p>无需填写地址或凭据；首次连接时允许浏览器访问本地网络，即刻开始 AI 增强。</p></div>
+          </div>
+          <div className="setup-flow" aria-hidden="true"><span>GITHUB KNOWLEDGE</span><i>→</i><span>WEB UI</span><i>→</i><span>LOCAL CLI</span><b /></div>
         </div>
       </section>
 
@@ -506,7 +539,7 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
                 <span className={`status status-${entry.status}`}>{statusLabel[entry.status]}</span>
               </div>
               <h3>{entry.title}</h3>
-              <GuidePanel entry={entry} guide={guides[entry.id]} loading={loadingId === entry.id} onGenerate={() => generateGuide(entry)} aiEnabled={Boolean(apiKey)} compact />
+              <GuidePanel entry={entry} guide={guides[entry.id]} loading={loadingId === entry.id} onGenerate={() => generateGuide(entry)} aiEnabled={aiEnabled} compact />
               <div className="card-footer">
                 <span>{entry.source} · 有效至 {entry.validUntil}</span>
                 <a href={entry.sourceUrl} target="_blank" rel="noreferrer" aria-label={`打开 ${entry.title} 的来源`}>核对原文 ↗</a>
@@ -541,12 +574,12 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
       <section className="freshness-section" id="freshness">
         <div className="freshness-copy">
           <p className="eyebrow">KNOWLEDGE FRESHNESS</p>
-          <h2>{apiKey ? "AI 自动增强，证据负责定级。" : "规则保持新鲜，人工决定采信。"}</h2>
-          <p>{apiKey
+          <h2>{aiEnabled ? "AI 自动增强，证据负责定级。" : "规则保持新鲜，人工决定采信。"}</h2>
+          <p>{aiEnabled
             ? "AI 自动生成导读、知识分类并通过联网搜索交叉核验，但不会把候选内容自动升级为可信知识。来源核对、版本快照、复现实验和人工 PR 审核仍是验证门槛。"
             : "采集器持续抓取五类来源，不生成 AI 导读。知识只按有效期进入复核、过期和归档阶段，可信度由人工检查来源与实验结果后决定。"}</p>
           <div className="lifecycle" aria-label="知识生命周期">
-            <span>发现</span><i>→</i><span>{apiKey ? "AI 增强" : "来源摘录"}</span><i>→</i><span>{apiKey ? "证据建议" : "人工核对"}</span><i>→</i><span>复核</span><i>→</i><span>归档</span>
+            <span>发现</span><i>→</i><span>{aiEnabled ? "AI 增强" : "来源摘录"}</span><i>→</i><span>{aiEnabled ? "证据建议" : "人工核对"}</span><i>→</i><span>复核</span><i>→</i><span>归档</span>
           </div>
         </div>
         <div className="expiry-panel">
@@ -588,7 +621,7 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
                 <div><span>{sourceLabel[entry.sourceType]} · {entry.source}</span><h3>{entry.title}</h3></div>
                 <span className={`status status-${entry.status}`}>{statusLabel[entry.status]}</span>
               </div>
-              <GuidePanel entry={entry} guide={guides[entry.id]} loading={loadingId === entry.id} onGenerate={() => generateGuide(entry)} aiEnabled={Boolean(apiKey)} />
+              <GuidePanel entry={entry} guide={guides[entry.id]} loading={loadingId === entry.id} onGenerate={() => generateGuide(entry)} aiEnabled={aiEnabled} />
               <div className="knowledge-card-bottom">
                 <span>版本 {entry.sourceVersion}</span><span>置信度 {entry.confidence}</span><span>验证 {entry.lastVerifiedAt || "待完成"}</span>
                 <a href={entry.sourceUrl} target="_blank" rel="noreferrer">查看证据 ↗</a>
@@ -606,7 +639,7 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
           <article><span>{dayLabels[workspace.auditDay]} · {workspace.auditTime}</span><h3>Freshness Audit</h3><p>提前 {workspace.reviewWindowDays} 天进入复核，过期内容退出默认检索。</p><code>review_window={workspace.reviewWindowDays}d</code>{bridgeStatus === "connected" && <button type="button" onClick={() => runBridgeRoutine("audit")} disabled={Boolean(bridgeRoutine)}>{bridgeRoutine === "audit" ? "正在审计…" : "由本地 CLI 立即审计"}</button>}</article>
           <article><span>MONTHLY · {workspace.gcDay} 日 {workspace.gcTime}</span><h3>Knowledge GC</h3><p>过期超过 {workspace.archiveAfterDays} 天后归档，同时保留来源和审计记录。</p><code>archive_after={workspace.archiveAfterDays}d</code>{bridgeStatus === "connected" && <button type="button" onClick={() => runBridgeRoutine("gc")} disabled={Boolean(bridgeRoutine)}>{bridgeRoutine === "gc" ? "正在归档…" : "由本地 CLI 立即归档"}</button>}</article>
         </div>
-        <p className="workflow-note">{bridgeStatus === "connected" ? "本地 Bridge 已连接：Codex/CLI 通过 MCP 修改设置或知识后，网页会在 5 秒内同步；三个维护任务也可从网页安全触发。" : "个人计划保存在本设备并影响当前工作台；仓库后台的 GitHub Actions 使用管理员全局计划。启动本地 Bridge 后，CLI 可通过 MCP 直接驱动网站。"}</p>
+        <p className="workflow-note">{bridgeStatus === "connected" ? "本地 CLI 已连接：网页知识始终来自 GitHub；本机负责 AI 导读、自动分类、证据核验、桌宠控制和页面会话内的个性化调度。维护任务的本地修改需提交到 GitHub 后才会进入在线知识库。" : "个人设置影响当前工作台；关闭页面后的公共知识维护仍由 GitHub Actions 执行。运行首页一键命令后即可复用本机 CLI 的完整 AI 能力。"}</p>
       </section>
 
       <footer>
@@ -620,20 +653,13 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
           <section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" onMouseDown={(event) => event.stopPropagation()}>
             <div className="settings-topline"><span>PERSONAL WORKBENCH</span><button type="button" onClick={() => setSettingsOpen(false)} aria-label="关闭工作台设置">×</button></div>
             <h2 id="settings-title">配置你的工作台</h2>
-            <p className="settings-lede">所有人都能手动设置来源、时间和过期策略。配置 API Key 后自动提炼、整理和联网核验；连接本地 Bridge 后，Codex/CLI 可通过 MCP 驱动整个工作台。</p>
+            <p className="settings-lede">来源、时间和过期策略可以手动设置。AI 导读、分类、联网核验与桌宠均复用本机 CLI 登录；在线知识始终以 GitHub 为准。</p>
 
             <fieldset className="settings-group bridge-settings">
-              <legend>本地 CLI / MCP（可选）</legend>
-              <div className="bridge-heading"><div><strong>Website as MCP</strong><p>在仓库运行 <code>npm run workbench:bridge</code>，再打开终端输出的一键连接链接；或在这里粘贴临时 Token。</p></div><span className={`bridge-status bridge-${bridgeStatus}`}>{bridgeStatus === "connected" ? "已连接" : bridgeStatus === "connecting" ? "连接中" : bridgeStatus === "error" ? "连接失败" : "未连接"}</span></div>
-              <div className="settings-grid">
-                <label>Bridge 地址<input type="url" value={bridgeUrl} onChange={(event) => setBridgeUrl(event.target.value)} spellCheck={false} /></label>
-                <label>临时 Token<input type="password" value={bridgeToken} onChange={(event) => setBridgeToken(event.target.value)} autoComplete="off" spellCheck={false} placeholder="启动 Bridge 后生成" /></label>
-              </div>
-              <div className="bridge-actions">
-                <button type="button" className="clear-button" onClick={() => void connectBridge()} disabled={bridgeStatus === "connecting"}>{bridgeStatus === "connecting" ? "正在连接…" : "连接本地能力"}</button>
-                {bridgeStatus === "connected" && <button type="button" className="clear-button" onClick={() => { setBridgeStatus("disconnected"); setBridgeToken(""); setKnowledgeEntries(entries); }}>断开</button>}
-              </div>
-              <p className="field-note">Bridge 只监听 127.0.0.1，使用临时令牌和来源白名单，且仅开放设置、采集、审计、归档等固定能力，不接受任意 Shell 命令。</p>
+              <legend>本地 MCP 状态</legend>
+              <div className="bridge-heading"><div><strong>{bridgeStatus === "connected" ? "本地 CLI 已接管 AI 能力" : "等待一键安装命令完成"}</strong><p>{bridgeStatus === "connected" ? "导读、分类、证据核验、桌宠和个人调度均由本机执行。" : "无需在网页填写地址、凭据或 API Key；安装器会完成注册、启动和连接。"}</p></div><span className={`bridge-status bridge-${bridgeStatus}`}>{bridgeStatus === "connected" ? "已连接" : bridgeStatus === "connecting" ? "连接中" : bridgeStatus === "error" ? "连接失败" : "未连接"}</span></div>
+              {bridgeStatus === "connected" && <div className="bridge-actions"><button type="button" className="clear-button danger-button" onClick={() => void disconnectLocal()}>安全断开本地连接</button></div>}
+              <p className="field-note">底层本地服务由安装器管理，只监听 127.0.0.1，使用随机端口和来源白名单，不接受任意 Shell 命令。</p>
             </fieldset>
 
             <fieldset className="settings-group">
@@ -657,7 +683,7 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
                 <label>每月归档日<input type="number" min="1" max="28" value={workspace.gcDay} onChange={(event) => setWorkspace((current) => ({ ...current, gcDay: clamp(event.target.value, 1, 28, current.gcDay) }))} /></label>
                 <label>归档时间<input type="time" value={workspace.gcTime} onChange={(event) => setWorkspace((current) => ({ ...current, gcTime: event.target.value }))} /></label>
               </div>
-              <p className="field-note">设备侧计划在本页打开时生效；关闭页面后的后台执行仍使用仓库管理员的 GitHub Actions 计划。</p>
+              <p className="field-note">页面保持打开时，本地 CLI 会按个人时间运行；关闭页面后本地连接自动退出，公共知识维护继续由 GitHub Actions 执行。</p>
             </fieldset>
 
             <fieldset className="settings-group">
@@ -669,34 +695,23 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
               </div>
             </fieldset>
 
-            <fieldset className="settings-group model-settings">
-              <legend>AI 自动增强与桌宠（可选）</legend>
-              <p className="settings-lede">保存 Key 后会自动为当前知识生成导读、类别和联网核验建议。密钥只保留在当前页面内存中，刷新即清除，不写入 GitHub、日志或浏览器持久存储。</p>
-              <div className="settings-grid">
-                <label>API Key<input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="sk-…" autoComplete="off" spellCheck={false} /></label>
-                <label>模型<select value={model} onChange={(event) => setModel(event.target.value)}><option value="gpt-5.6-sol">GPT-5.6 Sol · 高质量</option><option value="gpt-5.6-terra">GPT-5.6 Terra · 均衡</option><option value="gpt-5.6-luna">GPT-5.6 Luna · 高吞吐</option></select></label>
-              </div>
-              <label>Responses API 地址<input type="url" value={endpoint} onChange={(event) => setEndpoint(event.target.value)} spellCheck={false} /></label>
-            </fieldset>
-
-            <div className="security-note"><strong>安全提示</strong><p>静态网站没有服务端密钥保险箱。请使用限额明确的个人 Project Key；自定义接口会收到密钥、对话内容和当前工作台设置。</p></div>
+            <div className="security-note"><strong>无浏览器密钥</strong><p>网站没有 API Key 或模型端点输入框，也不会保存模型凭据。本地地址仅在当前标签页会话中用于刷新重连；本地服务只监听 127.0.0.1，并在页面心跳停止后自动退出。</p></div>
             {notice && <p className="settings-notice" role="alert">{notice}</p>}
             <div className="settings-actions">
-              <button type="button" className="clear-button" onClick={() => { setApiKey(""); setNotice(""); }}>清除密钥</button>
-              <button type="button" className="primary-button" onClick={() => void saveSettings()}>{bridgeStatus === "connected" ? "保存到本地知识核心" : "保存到本设备"} <span>✓</span></button>
+              <button type="button" className="primary-button" onClick={() => void saveSettings()}>{bridgeStatus === "connected" ? "同步设置并运行本地 AI" : "保存到本设备"} <span>✓</span></button>
             </div>
           </section>
         </div>
       )}
 
-      {(apiKey || bridgeStatus === "connected") && (
+      {bridgeStatus === "connected" && (
         <aside className={`pet-agent${petOpen ? " pet-open" : ""}`} aria-label="工作台桌宠 Agent">
           {petOpen && (
             <section className="pet-chat">
-              <div className="pet-chat-header"><div><span className="pet-mini">•ᴗ•</span><strong>{bridgeStatus === "connected" ? "Local CLI Agent" : "Workbench Agent"}</strong></div><button type="button" onClick={() => setPetOpen(false)} aria-label="收起桌宠对话">×</button></div>
+              <div className="pet-chat-header"><div><span className="pet-mini">•ᴗ•</span><strong>Local CLI Agent</strong></div><button type="button" onClick={() => setPetOpen(false)} aria-label="收起桌宠对话">×</button></div>
               <div className="pet-messages" aria-live="polite">
                 {petMessages.map((message, index) => <p className={message.role} key={`${message.role}-${index}`}>{message.text}</p>)}
-                {petLoading && <p className="agent">{bridgeStatus === "connected" ? "本地 Agent 正在思考并调整…" : "正在调整工作台…"}</p>}
+                {petLoading && <p className="agent">本地 Agent 正在思考并调整…</p>}
               </div>
               <form onSubmit={sendPetMessage}>
                 <input value={petInput} onChange={(event) => setPetInput(event.target.value)} placeholder="例如：只看 GitHub 和报告，每天 9 点更新" aria-label="向工作台 Agent 发送消息" />

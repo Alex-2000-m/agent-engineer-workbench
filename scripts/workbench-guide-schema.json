@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "properties": {
+    "guides": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "summary": { "type": "string" },
+          "impact": { "type": "string" },
+          "action": { "type": "string" },
+          "category": { "type": "string" },
+          "verification": { "enum": ["supported", "needs_review", "conflict", "insufficient"] },
+          "verificationNote": { "type": "string" }
+        },
+        "required": ["id", "summary", "impact", "action", "category", "verification", "verificationNote"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["guides"],
+  "additionalProperties": false
+}
