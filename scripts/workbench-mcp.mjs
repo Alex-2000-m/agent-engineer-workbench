@@ -2,17 +2,35 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { getSnapshot, proposeKnowledge, removeWatchSource, runRoutine, updateKnowledge, updateSettings, upsertWatchSource } from "./workbench-core.mjs";
+import { getSnapshot, proposeKnowledge, removeWatchSource, renameWatchCategory, runRoutine, updateKnowledge, updateSettings, upsertWatchSource } from "./workbench-core.mjs";
 
 const server = new McpServer(
-  { name: "agent-engineer-workbench", version: "0.3.0" },
-  { instructions: "This MCP edits the current user's GitHub Fork worktree. Read get_workbench_snapshot before changing it. You may customize concrete watched sources and propose or revise knowledge when the user asks. New or edited knowledge must return to candidate and must never be marked verified automatically. Use only the named maintenance routines; no arbitrary shell execution is available. Show the Git diff and let the user review before commit or push." },
+  { name: "agent-engineer-workbench", version: "0.4.0" },
+  { instructions: "This MCP is the control plane for the entire Agent Workbench website. The public site is a data-free view; the current user's GitHub worktree is the source of truth. Read workbench://snapshot or get_workbench_snapshot before writes. You may manage source categories, concrete monitors, schedules, lifecycle policy, and candidate knowledge. Never mark knowledge verified automatically. Show Git diff before commit or push. No arbitrary shell execution or secret handling is available." },
 );
 
 const jsonResult = (value) => ({
   content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
   structuredContent: value,
 });
+
+function registerJsonResource(name, uri, title, description, select) {
+  server.registerResource(name, uri, { title, description, mimeType: "application/json" }, async (resourceUri) => {
+    const snapshot = await getSnapshot();
+    return { contents: [{ uri: resourceUri.href, mimeType: "application/json", text: JSON.stringify(select(snapshot), null, 2) }] };
+  });
+}
+
+registerJsonResource("workbench-snapshot", "workbench://snapshot", "Complete workbench state", "Knowledge, guides, source monitors, categories, schedules, and freshness policy.", (snapshot) => snapshot);
+registerJsonResource("workbench-sources", "workbench://sources", "Source registry", "Concrete GitHub Release and RSS/Atom monitors owned by the current user.", (snapshot) => snapshot.sources);
+registerJsonResource("workbench-knowledge", "workbench://knowledge", "Knowledge library", "Current knowledge entries and AI guide suggestions.", (snapshot) => ({ entries: snapshot.entries, guides: snapshot.guides }));
+registerJsonResource("workbench-settings", "workbench://settings", "Workspace policy", "Enabled source families, schedules, and expiration policy.", (snapshot) => snapshot.settings);
+
+server.registerPrompt("manage-workbench", {
+  title: "Manage Agent Workbench",
+  description: "Turn a natural-language workspace request into safe reads and bounded MCP tool calls.",
+  argsSchema: { request: z.string().min(1) },
+}, ({ request }) => ({ messages: [{ role: "user", content: { type: "text", text: `Read workbench://snapshot, then fulfill this Agent Workbench request with the available MCP tools: ${request}. Keep new or edited knowledge in candidate state and show the Git diff before any commit or push.` } }] }));
 
 server.registerTool("get_workbench_snapshot", {
   title: "Get workbench snapshot",
@@ -61,6 +79,13 @@ server.registerTool("remove_watch_source", {
   inputSchema: { id: z.string().min(1) },
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 }, async ({ id }) => jsonResult(await removeWatchSource(id)));
+
+server.registerTool("rename_watch_category", {
+  title: "Rename watched source category",
+  description: "Rename one user-defined category across every concrete monitor currently assigned to it.",
+  inputSchema: { from: z.string().min(1).max(60), to: z.string().min(1).max(60) },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+}, async ({ from, to }) => jsonResult(await renameWatchCategory(from, to)));
 
 server.registerTool("run_knowledge_routine", {
   title: "Run knowledge maintenance",

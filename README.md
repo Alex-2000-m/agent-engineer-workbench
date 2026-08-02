@@ -3,7 +3,7 @@
 一套可 Fork 的 Agent 工程知识工作台框架。框架代码来自上游，每个用户的知识、来源、AI 导读、策略和审计记录都由自己的 GitHub Fork 托管；本机 Codex CLI 只负责计算、MCP 控制和 Git 同步，不是知识托管层。
 
 - 上游演示站：<https://alex-2000-m.github.io/agent-engineer-workbench/>
-- 上游仓库默认不携带具体知识，`knowledge/entries.json` 从空数组开始
+- 上游仓库不携带具体知识、监测源、AI 导读或带日期的审计结果；对应数据文件从空状态开始
 - 网站不接收 API Key，也不保存模型凭据
 - Dashboard、知识库、来源、自动化和快速开始均为独立页面
 
@@ -66,6 +66,8 @@ flowchart LR
 | UI、MCP、维护脚本 | 上游框架，经用户主动 Sync fork 更新 | 是 |
 
 本机存在的仓库目录只是用户 Fork 的 Git 工作副本。需要长期保存的变化必须提交并推送到用户自己的 GitHub；网页不会创建另一份云端账户或本地专有知识库。
+
+公共 `main` 的数据不变量：`knowledge/entries.json` 为 `[]`、`knowledge/guides.json` 为 `{}`、`watchlist/sources.json` 为 `[]`，`knowledge/reports/` 只保留目录占位。五类来源类型和默认过期参数属于验证框架，不是具体监测内容。
 
 ## 多页面工作台
 
@@ -135,6 +137,16 @@ AI 不能直接把内容标记为 `verified`。自动采集一律创建 `candida
 
 ## MCP 工具
 
+整个网站是一层 MCP 可视化界面。Codex 可以读取四个资源：`workbench://snapshot`、`workbench://sources`、`workbench://knowledge` 和 `workbench://settings`；也可以使用 `manage-workbench` Prompt 把自然语言需求编排成受限工具调用。
+
+| 网站区域 | MCP 读取面 | MCP 写入面 |
+|---|---|---|
+| Dashboard | 完整 Snapshot | 运行采集、复核、归档 |
+| 来源 | Sources Resource | 新增、更新、移除监测源；重命名自定义类目 |
+| 知识库 | Knowledge Resource | 新增候选知识、修改并重新进入待验证 |
+| 自动化 | Settings Resource | 来源类型开关、定时计划、过期策略 |
+| 像素桌宠 | 完整 Snapshot | 编排上述来源、策略和维护工具 |
+
 - `get_workbench_snapshot`：读取当前 Fork 中的知识、来源、导读与设置。
 - `update_workspace_settings`：调整来源类别、时间和过期策略。
 - `run_knowledge_routine`：运行 `sync`、`audit` 或 `gc` 白名单任务。
@@ -142,6 +154,7 @@ AI 不能直接把内容标记为 `verified`。自动采集一律创建 `candida
 - `update_knowledge_entry`：修改现有知识内容，并自动退回 `candidate`、清除旧导读。
 - `upsert_watch_source`：新增或覆盖 GitHub Release / RSS 监测源。
 - `remove_watch_source`：从监测清单移除来源，不删除已经沉淀的知识。
+- `rename_watch_category`：批量重命名用户自定义的具体来源类目。
 
 可以直接告诉 Codex：
 
@@ -153,7 +166,7 @@ AI 不能直接把内容标记为 `verified`。自动采集一律创建 `candida
 完成后展示 git diff，但先不要替我推送。
 ```
 
-这些自然语言请求由本地 Codex 选择并调用上述 MCP 工具。来源和知识先写入个人 Fork 的 Git 工作副本；新增或编辑后的知识不能继承旧的可信状态，必须重新核验。用户查看差异后再决定是否提交并推送到自己的 GitHub。
+这些自然语言请求由本地 Codex 或网页像素桌宠选择并调用受限能力。来源和知识先写入个人 Fork 的 Git 工作副本；新增或编辑后的知识不能继承旧的可信状态，必须重新核验。用户查看差异后再决定是否提交并推送到自己的 GitHub。
 
 ## 知识新鲜度
 

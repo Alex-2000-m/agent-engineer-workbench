@@ -10,14 +10,14 @@ export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   openGraph: {
     title: "Agent Workbench",
-    description: "框架共用，知识归你的 GitHub Fork；本地 CLI 完成 AI 导读、分类与核验。",
-    images: ["og-fork.png"],
+    description: "网站就是 MCP：公共框架负责界面，个人 GitHub 保存数据，本地 CLI 驱动全部能力。",
+    images: ["og-pixel.png"],
   },
   twitter: {
     card: "summary_large_image",
     title: "Agent Workbench",
-    description: "框架共用，知识归你的 GitHub Fork；本地 CLI 完成 AI 导读、分类与核验。",
-    images: ["og-fork.png"],
+    description: "网站就是 MCP：公共框架负责界面，个人 GitHub 保存数据，本地 CLI 驱动全部能力。",
+    images: ["og-pixel.png"],
   },
 };
 
