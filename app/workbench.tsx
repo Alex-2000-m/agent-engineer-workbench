@@ -1,10 +1,11 @@
 "use client";
+/* eslint-disable @next/next/no-img-element */
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type Guide, type WorkspacePatch } from "./ai-guide";
 
-type KnowledgeStatus = "verified" | "candidate" | "review" | "stale" | "archived" | "quarantined";
+type KnowledgeStatus = "active" | "cleanup" | "archived" | "verified" | "candidate" | "review" | "stale" | "quarantined";
 type SourceType = "github" | "blog" | "report" | "news" | "web";
 
 export type WorkspaceSettings = {
@@ -53,8 +54,12 @@ export type KnowledgeEntry = {
   sourceUrl: string;
   sourceVersion: string;
   observedAt: string;
-  lastVerifiedAt: string;
+  lastVerifiedAt?: string;
+  lastSummarizedAt?: string;
   validUntil: string;
+  imageUrl?: string;
+  cleanupReason?: string;
+  cleanupProposedAt?: string;
   summary: string;
   impact: string;
   tags: string[];
@@ -71,15 +76,6 @@ export type WatchSource = {
   name?: string;
   feedUrl?: string;
   keywords?: string[];
-};
-
-const statusLabel: Record<KnowledgeStatus, string> = {
-  verified: "已验证",
-  candidate: "待验证",
-  review: "需复核",
-  stale: "已过期",
-  archived: "已归档",
-  quarantined: "已隔离",
 };
 
 const sourceTypes: Array<{ id: SourceType; mark: string; label: string; description: string }> = [
@@ -121,13 +117,13 @@ function GuidePanel({
     return (
       <div className={`guide-panel source-extract${compact ? " guide-compact" : ""}`}>
         <div className="guide-heading">
-          <span>来源摘录 · 未经 AI 提炼</span>
+          <span>{aiEnabled ? "AI 中文摘要生成中" : "来源摘录"}</span>
           <small>AUTO CRAWLER</small>
         </div>
         <p>{entry.summary}</p>
-        <div className="non-ai-note">仅按过期规则整理，等待人工复核；这不是 AI 导读或事实核验结论。</div>
+        <div className="non-ai-note">{aiEnabled ? "本地 Codex 会自动完成中文摘要、重点提炼与工程影响整理。" : "连接本地 CLI 后，采集流程会自动补齐中文 AI 摘要。"}</div>
         <button type="button" className="guide-button" onClick={onGenerate} disabled={loading}>
-          {loading ? "正在提炼与核验…" : aiEnabled ? "运行本地 AI 增强" : "安装本地 MCP 获取 AI 导读"} <span>✦</span>
+          {loading ? "正在生成中文摘要…" : aiEnabled ? "立即生成摘要" : "安装本地 MCP"} <span>✦</span>
         </button>
       </div>
     );
@@ -135,18 +131,18 @@ function GuidePanel({
   return (
     <div className={`guide-panel${compact ? " guide-compact" : ""}`}>
       <div className="guide-heading">
-        <span>AI 导读 · 证据核验</span>
+        <span>AI 中文导读</span>
         <small>{guide.model}</small>
       </div>
-      <div className="guide-badges"><span>{guide.category}</span><span className={`verification verification-${guide.verification}`}>{guide.verification}</span></div>
+      <div className="guide-badges"><span>{guide.category}</span><span>RAG READY</span></div>
       <p>{guide.summary}</p>
+      {!compact && guide.highlights?.length > 0 && <ul className="guide-highlights">{guide.highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}</ul>}
       <dl>
         <div><dt>工程影响</dt><dd>{guide.impact}</dd></div>
         <div><dt>建议动作</dt><dd>{guide.action}</dd></div>
-        <div><dt>证据说明</dt><dd>{guide.verificationNote}</dd></div>
       </dl>
       <button type="button" className="guide-button" onClick={onGenerate} disabled={loading}>
-        {loading ? "正在提炼与核验…" : "重新运行 AI 增强"} <span>✦</span>
+        {loading ? "正在更新摘要…" : "更新 AI 摘要"} <span>✦</span>
       </button>
     </div>
   );
@@ -179,18 +175,7 @@ function applyWorkspacePatch(current: WorkspaceSettings, patch?: WorkspacePatch)
   };
 }
 
-function applyFreshnessPolicy(entry: KnowledgeEntry, settings: WorkspaceSettings): KnowledgeEntry {
-  if (["candidate", "quarantined"].includes(entry.status)) return entry;
-  const today = new Date();
-  const validUntil = new Date(`${entry.validUntil}T00:00:00Z`);
-  const daysRemaining = Math.ceil((validUntil.getTime() - today.getTime()) / 86_400_000);
-  if (daysRemaining < -settings.archiveAfterDays) return { ...entry, status: "archived" };
-  if (daysRemaining < 0) return { ...entry, status: "stale" };
-  if (daysRemaining <= settings.reviewWindowDays) return { ...entry, status: "review" };
-  return { ...entry, status: "verified" };
-}
-
-type WorkbenchView = "dashboard" | "knowledge" | "sources" | "automation";
+type WorkbenchView = "dashboard" | "knowledge" | "sources" | "automation" | "article" | "cleanup";
 type PetActivity = "running" | "needs-input" | "ready" | "blocked";
 
 const petActivityLabel: Record<PetActivity, string> = {
@@ -219,8 +204,10 @@ function PixelPet({ status, compact = false }: { status: PetActivity; compact?: 
 
 export function Workbench({ entries, initialGuides, initialSettings = defaultWorkspaceSettings, initialSources, view = "dashboard" }: { entries: KnowledgeEntry[]; initialGuides: Record<string, Guide>; initialSettings?: WorkspaceSettings; initialSources: WatchSource[]; view?: WorkbenchView }) {
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | KnowledgeStatus>("all");
   const [sourceFilter, setSourceFilter] = useState<"all" | SourceType>("all");
+  const [ragIds, setRagIds] = useState<string[] | null>(null);
+  const [ragSearching, setRagSearching] = useState(false);
+  const [selectedId, setSelectedId] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [workspace, setWorkspace] = useState(initialSettings);
   const [knowledgeEntries, setKnowledgeEntries] = useState(entries);
@@ -241,7 +228,7 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
     { role: "agent", text: "我是你的工作台 Agent。告诉我想关注哪些来源、几点更新，或知识多久复核一次。" },
   ]);
   const attemptedInitialConnection = useRef(false);
-  const repositoryUrl = process.env.NEXT_PUBLIC_REPOSITORY_URL ?? "https://github.com";
+  const recordedArticleAccess = useRef("");
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
   const aiEnabled = bridgeStatus === "connected";
   const petActivity: PetActivity = petBlocked ? "blocked" : petLoading ? "running" : petOpen ? "needs-input" : "ready";
@@ -264,8 +251,17 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
         ...init?.headers,
       },
     });
-    const payload = await response.json().catch(() => ({})) as { error?: string };
-    if (!response.ok) throw new Error(payload.error || `Bridge 返回 ${response.status}`);
+    const payload = await response.json().catch(() => ({})) as { error?: string; code?: string };
+    if (!response.ok) {
+      const safeMessages: Record<string, string> = {
+        LOCAL_AI_FAILED: "本地 AI 暂时没有完成这次处理，请稍后重试。",
+        ROUTINE_FAILED: "本地知识任务没有完成，请稍后重试。",
+        KNOWLEDGE_ACTION_FAILED: "知识操作没有完成，请刷新后重试。",
+        SEARCH_FAILED: "个人知识检索暂时不可用，请稍后重试。",
+        LOCAL_SERVICE_FAILED: "本地能力暂时不可用，请稍后重试。",
+      };
+      throw new Error(safeMessages[payload.code ?? ""] ?? "本地能力暂时不可用；详细原因仅记录在本机日志中。");
+    }
     return payload;
   }, [bridgeUrl]);
 
@@ -288,14 +284,19 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
     if (!targets.length) return;
     setAutoProgress({ done: 0, total: targets.length });
     try {
-      const result = await bridgeRequest("/enhance", {
-        method: "POST",
-        body: JSON.stringify({ entryIds: targets.map((entry) => entry.id) }),
-      }, connection) as { guides?: Record<string, Guide>; snapshot?: BridgeSnapshot };
-      if (result.guides) setGuides((current) => ({ ...current, ...result.guides }));
-      if (result.snapshot) applyBridgeSnapshot(result.snapshot);
-      setAutoProgress({ done: targets.length, total: targets.length });
-      setNotice(`本地 CLI 已完成 ${Object.keys(result.guides ?? {}).length} 条导读、分类与证据核验。`);
+      let completed = 0;
+      for (let index = 0; index < targets.length; index += 4) {
+        const batch = targets.slice(index, index + 4);
+        const result = await bridgeRequest("/enhance", {
+          method: "POST",
+          body: JSON.stringify({ entryIds: batch.map((entry) => entry.id) }),
+        }, connection) as { guides?: Record<string, Guide>; snapshot?: BridgeSnapshot };
+        if (result.guides) setGuides((current) => ({ ...current, ...result.guides }));
+        if (result.snapshot) applyBridgeSnapshot(result.snapshot);
+        completed += Object.keys(result.guides ?? {}).length;
+        setAutoProgress({ done: Math.min(index + batch.length, targets.length), total: targets.length });
+      }
+      setNotice(`本地 CLI 已自动完成 ${completed} 条中文摘要并更新 RAG 索引。`);
     } finally {
       setAutoProgress(null);
     }
@@ -314,15 +315,15 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
       if (!quiet) setNotice("本地 CLI 已连接。网站知识仍来自 GitHub，本地 CLI 正在提供 AI 增强与控制能力。");
       const cached = snapshot.guides ?? {};
       const currentEntries = snapshot.entries ?? [];
-      const targets = currentEntries.filter((entry) => entry.status !== "archived" && !(
+      const targets = currentEntries.filter((entry) => !["cleanup", "archived"].includes(entry.status) && !(
         cached[entry.id] && (!cached[entry.id].sourceVersion || cached[entry.id].sourceVersion === entry.sourceVersion)
       ));
-      if (targets.length) void enhanceLocally(targets.slice(0, 20), { url: nextUrl }).catch((error) => {
-        setNotice(error instanceof Error ? error.message : "本地 AI 自动增强失败");
+      if (targets.length) void enhanceLocally(targets, { url: nextUrl }).catch(() => {
+        setNotice("部分中文摘要尚未生成；详细原因只记录在本机日志中，可稍后重试。");
       });
-    } catch (error) {
+    } catch {
       setBridgeStatus("error");
-      if (!quiet) setNotice(error instanceof Error ? `${error.message}；若浏览器询问本地网络访问，请选择允许。` : "无法连接本地服务；若浏览器询问本地网络访问，请选择允许。");
+      if (!quiet) setNotice("无法连接本地服务；若浏览器询问本地网络访问，请选择允许。详细原因不会显示在网页上。");
     }
   }, [applyBridgeSnapshot, bridgeRequest, bridgeUrl, enhanceLocally]);
 
@@ -341,6 +342,10 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
   }, [connectBridge]);
 
   useEffect(() => {
+    setSelectedId(new URLSearchParams(window.location.search).get("entry") ?? "");
+  }, []);
+
+  useEffect(() => {
     if (bridgeStatus !== "connected") return;
     const timer = window.setInterval(async () => {
       try {
@@ -357,28 +362,59 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
     return () => window.clearInterval(timer);
   }, [applyBridgeSnapshot, bridgeRequest, bridgeStatus, entries, initialGuides, initialSources]);
 
-  const policyEntries = knowledgeEntries.map((entry) => applyFreshnessPolicy(entry, workspace));
-  const activeEntries = policyEntries.filter((entry) => entry.status !== "archived" && workspace.enabledSources.includes(entry.sourceType));
+  const policyEntries = knowledgeEntries;
+  const cleanupEntries = policyEntries.filter((entry) => entry.status === "cleanup");
+  const activeEntries = policyEntries.filter((entry) => !["cleanup", "archived"].includes(entry.status) && workspace.enabledSources.includes(entry.sourceType));
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return activeEntries.filter((entry) => {
-      const matchesStatus = statusFilter === "all" || entry.status === statusFilter;
+    const matched = activeEntries.filter((entry) => {
       const matchesSource = sourceFilter === "all" || entry.sourceType === sourceFilter;
       const haystack = [entry.title, entry.summary, entry.impact, entry.action, entry.category, entry.source, ...entry.tags]
         .join(" ")
         .toLowerCase();
-      return matchesStatus && matchesSource && (!needle || haystack.includes(needle));
+      const matchesQuery = !needle || (ragIds ? ragIds.includes(entry.id) : haystack.includes(needle));
+      return matchesSource && matchesQuery;
     });
-  }, [activeEntries, query, sourceFilter, statusFilter]);
+    if (!ragIds) return matched;
+    const rank = new Map(ragIds.map((id, index) => [id, index]));
+    return matched.sort((left, right) => (rank.get(left.id) ?? 999) - (rank.get(right.id) ?? 999));
+  }, [activeEntries, query, ragIds, sourceFilter]);
 
-  const verified = activeEntries.filter((entry) => entry.status === "verified").length;
-  const review = activeEntries.filter((entry) => entry.status === "review").length;
-  const stale = activeEntries.filter((entry) => entry.status === "stale").length;
+  const summarized = activeEntries.filter((entry) => Boolean(guides[entry.id])).length;
+  const illustrated = activeEntries.filter((entry) => Boolean(entry.imageUrl)).length;
   const radar = activeEntries.slice(0, 3);
+  const selectedEntry = activeEntries.find((entry) => entry.id === selectedId) ?? cleanupEntries.find((entry) => entry.id === selectedId);
+
+  useEffect(() => {
+    if (view !== "knowledge" || bridgeStatus !== "connected" || !query.trim()) {
+      setRagIds(null);
+      setRagSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setRagSearching(true);
+    const timer = window.setTimeout(() => {
+      void bridgeRequest("/search", { method: "POST", body: JSON.stringify({ query, topK: 50 }) })
+        .then((payload) => {
+          if (cancelled) return;
+          const results = (payload as { results?: Array<{ id: string }> }).results ?? [];
+          setRagIds(results.map((result) => result.id));
+        })
+        .catch(() => { if (!cancelled) setRagIds(null); })
+        .finally(() => { if (!cancelled) setRagSearching(false); });
+    }, 220);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [bridgeRequest, bridgeStatus, query, view]);
+
+  useEffect(() => {
+    if (view !== "article" || bridgeStatus !== "connected" || !selectedEntry || recordedArticleAccess.current === selectedEntry.id) return;
+    recordedArticleAccess.current = selectedEntry.id;
+    void bridgeRequest("/knowledge/access", { method: "POST", body: JSON.stringify({ id: selectedEntry.id }) }).catch(() => {});
+  }, [bridgeRequest, bridgeStatus, selectedEntry, view]);
 
   const generateGuide = async (entry: KnowledgeEntry) => {
     if (bridgeStatus !== "connected") {
-      setNotice("请先在快速开始页安装本地 MCP，再生成导读、分类和证据核验。");
+      setNotice("请先在快速开始页安装本地 MCP，再生成中文摘要。");
       window.location.assign(`${basePath}/quickstart`);
       return;
     }
@@ -387,7 +423,7 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
     try {
       await enhanceLocally([entry]);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "知识增强失败");
+      setNotice(error instanceof Error ? error.message : "中文摘要暂时没有生成，请稍后重试。");
     } finally {
       setLoadingId(null);
     }
@@ -401,7 +437,7 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
       return;
     }
     try {
-      await enhanceLocally(targets.slice(0, 20));
+      await enhanceLocally(targets);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "本地 AI 自动增强失败");
     }
@@ -429,11 +465,25 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
     try {
       const result = await bridgeRequest(`/actions/${routine}`, { method: "POST" }) as { snapshot?: BridgeSnapshot };
       if (result.snapshot) applyBridgeSnapshot(result.snapshot);
-      setNotice(`${routine.toUpperCase()} 已由本地 CLI 执行完成。`);
+      setNotice(routine === "sync" ? "采集、中文摘要和 RAG 索引已由本地 CLI 自动完成。" : "知识清洗已完成；需要决定去留的内容已移入待清理区。");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "本地任务执行失败");
     } finally {
       setBridgeRoutine(null);
+    }
+  };
+
+  const resolveCleanup = async (entry: KnowledgeEntry, decision: "keep" | "archive") => {
+    if (bridgeStatus !== "connected") {
+      setNotice("连接本地 CLI 后才能保存清理决定。");
+      return;
+    }
+    try {
+      const result = await bridgeRequest("/knowledge/cleanup", { method: "POST", body: JSON.stringify({ id: entry.id, decision }) }) as { snapshot?: BridgeSnapshot };
+      if (result.snapshot) applyBridgeSnapshot(result.snapshot);
+      setNotice(decision === "keep" ? "已保留这条知识，并延长其保留时间。" : "已将这条知识移入可恢复归档。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "清理决定没有保存，请稍后重试。");
     }
   };
 
@@ -502,9 +552,10 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
         </Link>
         <nav aria-label="主导航">
           <Link className={view === "dashboard" ? "active" : ""} href="/">Dashboard</Link>
-          <Link className={view === "knowledge" ? "active" : ""} href="/knowledge">知识库</Link>
+          <Link className={view === "knowledge" || view === "article" ? "active" : ""} href="/knowledge">知识库</Link>
           <Link className={view === "sources" ? "active" : ""} href="/sources">来源</Link>
           <Link className={view === "automation" ? "active" : ""} href="/automation">自动化</Link>
+          <Link className={view === "cleanup" ? "active" : ""} href="/cleanup">待清理{cleanupEntries.length ? ` · ${cleanupEntries.length}` : ""}</Link>
           <Link href="/quickstart">快速开始</Link>
         </nav>
         <div className="header-actions">
@@ -517,18 +568,19 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
 
       <div className={`mode-strip ${aiEnabled ? "ai-mode" : "basic-mode"}`}>
         <strong>{aiEnabled ? "本地 CLI AI 模式" : "GitHub 基础模式"}</strong>
-        <span>{aiEnabled ? "自动导读 · 自动分类 · 联网证据核验" : "当前 Fork 知识 · 过期规则 · 等待本地 CLI"}</span>
+        <span>{aiEnabled ? "自动中文摘要 · RAG 召回 · GC 清洗" : "当前 Fork 知识 · 等待本地 CLI"}</span>
         {autoProgress && <span className="mode-progress">正在增强 {autoProgress.done}/{autoProgress.total}</span>}
         {bridgeStatus === "connected" && <span className="bridge-indicator">本地 CLI 正在驱动 · {bridgeUpdatedAt ? new Date(bridgeUpdatedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "已连接"}</span>}
+        {cleanupEntries.length > 0 && <Link className="cleanup-reminder" href="/cleanup">{cleanupEntries.length} 条知识等待决定去留 →</Link>}
         {notice && !settingsOpen && <button type="button" onClick={() => setNotice("")} aria-label="关闭通知">{notice} ×</button>}
       </div>
 
       {view === "dashboard" && <>
       <section className="metrics dashboard-metrics" aria-label="知识指标">
-        <article><span>01</span><strong>{verified}</strong><p>已验证知识</p></article>
-        <article><span>02</span><strong>{review}</strong><p>即将到期</p></article>
-        <article><span>03</span><strong>{stale}</strong><p>退出检索</p></article>
-        <article><span>04</span><strong>5</strong><p>来源板块</p></article>
+        <article><span>01</span><strong>{activeEntries.length}</strong><p>活跃知识</p></article>
+        <article><span>02</span><strong>{summarized}</strong><p>AI 中文摘要</p></article>
+        <article><span>03</span><strong>{illustrated}</strong><p>来源配图</p></article>
+        <article><span>04</span><strong>{watchSources.length}</strong><p>个人来源</p></article>
       </section>
 
       <section className="section" id="radar">
@@ -542,13 +594,13 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
               <div className="card-meta">
                 <span className="category-mark">{categoryMark[entry.category] ?? "KN"}</span>
                 <span>{sourceLabel[entry.sourceType]}</span>
-                <span className={`status status-${entry.status}`}>{statusLabel[entry.status]}</span>
               </div>
-              <h3>{entry.title}</h3>
+              {entry.imageUrl && <img className="radar-card-image" src={entry.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" />}
+              <h3><Link className="article-title-link" href={`/article?entry=${encodeURIComponent(entry.id)}`}>{entry.title}</Link></h3>
               <GuidePanel entry={entry} guide={guides[entry.id]} loading={loadingId === entry.id} onGenerate={() => generateGuide(entry)} aiEnabled={aiEnabled} compact />
               <div className="card-footer">
                 <span>{entry.source} · 有效至 {entry.validUntil}</span>
-                <a href={entry.sourceUrl} target="_blank" rel="noreferrer" aria-label={`打开 ${entry.title} 的来源`}>核对原文 ↗</a>
+                <a href={entry.sourceUrl} target="_blank" rel="noreferrer" aria-label={`打开 ${entry.title} 的来源`}>直达原文 ↗</a>
               </div>
             </article>
           ))}
@@ -566,7 +618,7 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
         <div className="source-grid">
           {sourceTypes.map((source) => {
             const enabled = workspace.enabledSources.includes(source.id);
-            const count = policyEntries.filter((entry) => entry.status !== "archived" && entry.sourceType === source.id).length;
+            const count = policyEntries.filter((entry) => !["cleanup", "archived"].includes(entry.status) && entry.sourceType === source.id).length;
             return (
               <button type="button" className={enabled ? "" : "source-disabled"} key={source.id} onClick={() => { if (!enabled) toggleSource(source.id); chooseSource(source.id); }}>
                 <span className="source-mark">{source.mark}</span>
@@ -600,31 +652,27 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
       {view === "automation" && <section className="freshness-section page-section" id="freshness">
         <div className="freshness-copy">
           <p className="eyebrow">KNOWLEDGE FRESHNESS</p>
-          <h2>{aiEnabled ? "AI 自动增强，证据负责定级。" : "规则保持新鲜，人工决定采信。"}</h2>
+          <h2>采集即整理，GC 负责清洗。</h2>
           <p>{aiEnabled
-            ? "AI 自动生成导读、知识分类并通过联网搜索交叉核验，但不会把候选内容自动升级为可信知识。来源核对、版本快照、复现实验和人工 PR 审核仍是验证门槛。"
-            : "采集器持续抓取五类来源，不生成 AI 导读。知识只按有效期进入复核、过期和归档阶段，可信度由人工检查来源与实验结果后决定。"}</p>
+            ? "每次采集都会自动生成中文摘要、重点与工程影响，并重建个人 RAG 索引。定时 GC 只把低使用、重复或长期失效的内容移入待清理区，不会直接删除。"
+            : "连接本地 CLI 后，采集、中文摘要、RAG 索引和知识清洗会组成一条自动流水线。网页无需保存任何模型密钥。"}</p>
           <div className="lifecycle" aria-label="知识生命周期">
-            <span>发现</span><i>→</i><span>{aiEnabled ? "AI 增强" : "来源摘录"}</span><i>→</i><span>{aiEnabled ? "证据建议" : "人工核对"}</span><i>→</i><span>复核</span><i>→</i><span>归档</span>
+            <span>多源采集</span><i>→</i><span>中文摘要</span><i>→</i><span>RAG 索引</span><i>→</i><span>定时清洗</span>
           </div>
           <button type="button" className="primary-button policy-button" onClick={() => setSettingsOpen(true)}>配置来源、时间与过期策略 <span>→</span></button>
         </div>
         <div className="expiry-panel">
-          <div className="expiry-header"><span>即将到期</span><strong>{review + stale}</strong></div>
-          {activeEntries.filter((entry) => ["review", "stale"].includes(entry.status)).map((entry) => (
-            <div className="expiry-item" key={entry.id}>
-              <div><strong>{entry.title}</strong><span>{entry.sourceVersion} · {entry.freshnessClass}</span></div>
-              <span className={`status status-${entry.status}`}>{statusLabel[entry.status]}</span>
-            </div>
-          ))}
-          <a className="audit-link" href={`${repositoryUrl}/actions/workflows/freshness-audit.yml`} target="_blank" rel="noreferrer">查看审计工作流 <span>↗</span></a>
+          <div className="expiry-header"><span>待清理区</span><strong>{cleanupEntries.length}</strong></div>
+          <p className="gc-panel-copy">GC 只提出清理建议。最终保留或归档由你在独立页面决定。</p>
+          <div className="gc-panel-stats"><span>活跃知识 <b>{activeEntries.length}</b></span><span>AI 摘要 <b>{summarized}</b></span><span>索引可召回 <b>{activeEntries.length}</b></span></div>
+          <Link className="audit-link" href="/cleanup">打开待清理区 <span>↗</span></Link>
         </div>
       </section>}
 
       {view === "knowledge" && <section className="section library page-section" id="knowledge">
         <div className="section-heading library-heading">
           <div><p className="eyebrow">GUIDED LIBRARY</p><h2>知识库与导读</h2></div>
-          <label className="search-box"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索工具、论文、框架…" aria-label="搜索知识库" /></label>
+          <label className="search-box"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="用自然语言搜索个人知识…" aria-label="搜索知识库" /><small>{ragSearching ? "RAG 召回中" : bridgeStatus === "connected" && query ? "RAG 结果" : "本地筛选"}</small></label>
         </div>
         <div className="filter-groups">
           <div className="filter-row" role="group" aria-label="来源筛选">
@@ -632,48 +680,82 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
             <button className={sourceFilter === "all" ? "active" : ""} onClick={() => setSourceFilter("all")}>全部</button>
             {sourceTypes.map((source) => <button key={source.id} className={sourceFilter === source.id ? "active" : ""} onClick={() => setSourceFilter(source.id)}>{source.label}</button>)}
           </div>
-          <div className="filter-row" role="group" aria-label="知识状态筛选">
-            <span className="filter-label">状态</span>
-            {(["all", "verified", "candidate", "review", "stale"] as const).map((value) => (
-              <button key={value} className={statusFilter === value ? "active" : ""} onClick={() => setStatusFilter(value)}>{value === "all" ? "全部" : statusLabel[value]}</button>
-            ))}
-            <span className="result-count">{filtered.length} 个结果</span>
-          </div>
+          <div className="filter-row"><span className="filter-label">召回</span><span className="result-count">{filtered.length} 个结果 · {bridgeStatus === "connected" ? "个人 RAG 索引" : "当前页面索引"}</span></div>
         </div>
         <div className="knowledge-grid">
           {filtered.map((entry) => (
             <article className="knowledge-card" key={entry.id}>
               <div className="knowledge-card-top">
                 <span className="knowledge-icon">{categoryMark[entry.category] ?? "KN"}</span>
-                <div><span>{sourceLabel[entry.sourceType]} · {entry.source}</span><h3>{entry.title}</h3></div>
-                <span className={`status status-${entry.status}`}>{statusLabel[entry.status]}</span>
+                <div><span>{sourceLabel[entry.sourceType]} · {entry.source}</span><h3><Link className="article-title-link" href={`/article?entry=${encodeURIComponent(entry.id)}`}>{entry.title}</Link></h3></div>
               </div>
+              {entry.imageUrl && <img className="knowledge-card-image" src={entry.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" />}
               <GuidePanel entry={entry} guide={guides[entry.id]} loading={loadingId === entry.id} onGenerate={() => generateGuide(entry)} aiEnabled={aiEnabled} />
               <div className="knowledge-card-bottom">
-                <span>版本 {entry.sourceVersion}</span><span>置信度 {entry.confidence}</span><span>验证 {entry.lastVerifiedAt || "待完成"}</span>
-                <a href={entry.sourceUrl} target="_blank" rel="noreferrer">查看证据 ↗</a>
+                <span>{entry.sourceVersion}</span><span>收录 {entry.observedAt.slice(0, 10)}</span>
+                <a href={entry.sourceUrl} target="_blank" rel="noreferrer">直达原文 ↗</a>
               </div>
             </article>
           ))}
           {filtered.length === 0 && <div className="empty-state">没有符合条件的知识条目。</div>}
         </div>
-        <div className="cli-chat-callout knowledge-chat-callout"><span>CLI CHAT</span><div><strong>用聊天新增或修改知识</strong><p>Codex 会调用 MCP 写入当前 Fork；新增和修改后的内容一律回到待验证状态。</p><code>“把这篇报告加入知识库，摘要重点放在评测方法；再把条目 abc 的工程影响改成适用于多 Agent 路由。”</code></div></div>
+        <div className="cli-chat-callout knowledge-chat-callout"><span>CLI CHAT</span><div><strong>用聊天检索、新增或修改知识</strong><p>Codex 会先通过个人 RAG 索引召回相关内容，再调用 MCP 更新当前 Fork。</p><code>“从我的知识库召回与多 Agent 评测有关的内容，总结可以直接复用的工程方法。”</code></div></div>
+      </section>}
+
+      {view === "article" && <section className="article-page page-section">
+        <Link className="article-back" href="/knowledge">← 返回知识库</Link>
+        {selectedEntry ? <article className="article-detail">
+          <header className="article-detail-header">
+            <div className="article-kicker"><span>{sourceLabel[selectedEntry.sourceType]}</span><i />{selectedEntry.source}<i />{selectedEntry.observedAt.slice(0, 10)}</div>
+            <h1>{selectedEntry.title}</h1>
+            <p>{guides[selectedEntry.id]?.summary ?? selectedEntry.summary}</p>
+            <div className="article-actions"><a className="primary-button" href={selectedEntry.sourceUrl} target="_blank" rel="noreferrer">直达原文 <span>↗</span></a><span>由本地 Codex 自动生成中文摘要</span></div>
+          </header>
+          <figure className={`article-visual${selectedEntry.imageUrl ? " has-image" : " article-visual-fallback"}`}>
+            {selectedEntry.imageUrl ? <img src={selectedEntry.imageUrl} alt={`${selectedEntry.title} 的来源配图`} referrerPolicy="no-referrer" /> : <div><span>{categoryMark[selectedEntry.category] ?? "KN"}</span><strong>{selectedEntry.category}</strong><small>{selectedEntry.source}</small></div>}
+            <figcaption>来源配图 · 图片版权归原发布者所有</figcaption>
+          </figure>
+          <div className="article-content-grid">
+            <div className="article-main-copy">
+              <section><p className="eyebrow">AI SUMMARY</p><h2>这篇内容讲了什么</h2><p>{guides[selectedEntry.id]?.summary ?? selectedEntry.summary}</p></section>
+              {guides[selectedEntry.id]?.highlights?.length ? <section><p className="eyebrow">KEY POINTS</p><h2>核心要点</h2><ol>{guides[selectedEntry.id].highlights.map((highlight, index) => <li key={highlight}><span>{String(index + 1).padStart(2, "0")}</span><p>{highlight}</p></li>)}</ol></section> : <section className="article-summary-pending"><p>中文重点正在由本地 Codex 自动生成。</p><button type="button" onClick={() => void generateGuide(selectedEntry)} disabled={loadingId === selectedEntry.id}>{loadingId === selectedEntry.id ? "正在生成…" : "立即生成摘要"}</button></section>}
+            </div>
+            <aside className="article-insights">
+              <div><span>ENGINEERING IMPACT</span><p>{guides[selectedEntry.id]?.impact ?? selectedEntry.impact}</p></div>
+              <div><span>NEXT ACTION</span><p>{guides[selectedEntry.id]?.action ?? selectedEntry.action}</p></div>
+              <div><span>SOURCE</span><p>{selectedEntry.source}</p><a href={selectedEntry.sourceUrl} target="_blank" rel="noreferrer">打开原始文章 ↗</a></div>
+            </aside>
+          </div>
+        </article> : <div className="empty-state article-empty"><strong>没有找到这篇知识。</strong><p>它可能尚未从私人仓库载入，或已经被移入归档。</p><Link href="/knowledge">返回知识库 →</Link></div>}
+      </section>}
+
+      {view === "cleanup" && <section className="section cleanup-page page-section">
+        <div className="section-heading"><div><p className="eyebrow">CLEANUP REVIEW</p><h2>决定知识的最终去留</h2><p className="section-lede">GC 只把可能失效、重复或长期未使用的内容移到这里，不会自动删除。保留会延长生命周期；归档仍可从 Git 历史恢复。</p></div></div>
+        <div className="cleanup-grid">
+          {cleanupEntries.map((entry) => <article className="cleanup-card" key={entry.id}>
+            <div><span>{sourceLabel[entry.sourceType]}</span><small>{entry.source}</small></div>
+            <h3><Link className="article-title-link" href={`/article?entry=${encodeURIComponent(entry.id)}`}>{entry.title}</Link></h3>
+            <p>{entry.cleanupReason || "GC 建议清理这条知识。"}</p>
+            <div className="cleanup-card-actions"><button type="button" onClick={() => void resolveCleanup(entry, "keep")} disabled={bridgeStatus !== "connected"}>保留知识</button><button type="button" className="archive-button" onClick={() => void resolveCleanup(entry, "archive")} disabled={bridgeStatus !== "connected"}>移入归档</button></div>
+          </article>)}
+          {cleanupEntries.length === 0 && <div className="empty-state"><strong>待清理区是空的。</strong><p>GC 当前没有提出需要你决定去留的知识。</p><Link href="/knowledge">返回知识库 →</Link></div>}
+        </div>
       </section>}
 
       {view === "automation" && <section className="workflow-section" id="workflow">
         <div className="section-heading"><div><p className="eyebrow">AUTOMATED ROUTINES</p><h2>让知识自己保持清醒</h2></div></div>
         <div className="workflow-grid">
           <article><span>PERSONAL · {workspace.radarTime}</span><h3>Multi-source Radar</h3><p>按你的五类来源开关与默认 {workspace.defaultTtlDays} 天有效期整理个人知识视图。</p><code>{workspace.enabledSources.length} sources enabled</code>{bridgeStatus === "connected" && <button type="button" onClick={() => runBridgeRoutine("sync")} disabled={Boolean(bridgeRoutine)}>{bridgeRoutine === "sync" ? "正在采集…" : "由本地 CLI 立即采集"}</button>}</article>
-          <article><span>{dayLabels[workspace.auditDay]} · {workspace.auditTime}</span><h3>Freshness Audit</h3><p>提前 {workspace.reviewWindowDays} 天进入复核，过期内容退出默认检索。</p><code>review_window={workspace.reviewWindowDays}d</code>{bridgeStatus === "connected" && <button type="button" onClick={() => runBridgeRoutine("audit")} disabled={Boolean(bridgeRoutine)}>{bridgeRoutine === "audit" ? "正在审计…" : "由本地 CLI 立即审计"}</button>}</article>
-          <article><span>MONTHLY · {workspace.gcDay} 日 {workspace.gcTime}</span><h3>Knowledge GC</h3><p>过期超过 {workspace.archiveAfterDays} 天后归档，同时保留来源和审计记录。</p><code>archive_after={workspace.archiveAfterDays}d</code>{bridgeStatus === "connected" && <button type="button" onClick={() => runBridgeRoutine("gc")} disabled={Boolean(bridgeRoutine)}>{bridgeRoutine === "gc" ? "正在归档…" : "由本地 CLI 立即归档"}</button>}</article>
+          <article><span>{dayLabels[workspace.auditDay]} · {workspace.auditTime}</span><h3>轻量知识清洗</h3><p>定期清理短期噪声；高频使用的知识会获得更长保留时间。</p><code>cleanup_buffer={workspace.reviewWindowDays}d</code>{bridgeStatus === "connected" && <button type="button" onClick={() => runBridgeRoutine("audit")} disabled={Boolean(bridgeRoutine)}>{bridgeRoutine === "audit" ? "正在清洗…" : "立即轻量清洗"}</button>}</article>
+          <article><span>MONTHLY · {workspace.gcDay} 日 {workspace.gcTime}</span><h3>深度 Knowledge GC</h3><p>识别重复、失效和长期未使用内容，只移入待清理区，不直接删除。</p><code>retention_buffer={workspace.archiveAfterDays}d</code>{bridgeStatus === "connected" && <button type="button" onClick={() => runBridgeRoutine("gc")} disabled={Boolean(bridgeRoutine)}>{bridgeRoutine === "gc" ? "正在清洗…" : "立即深度清洗"}</button>}</article>
         </div>
-        <p className="workflow-note">{bridgeStatus === "connected" ? "本地 CLI 已连接：你的 Fork 是知识事实源；本机负责 AI 导读、自动分类、证据核验和桌宠控制。检查本地差异后提交并推送，Pages 才会长期展示更新。" : "你的 Fork 中的 GitHub Actions 负责持续采集、复核与归档；打开快速开始页可复用本机 CLI 的完整 AI 能力。"}</p>
+        <p className="workflow-note">{bridgeStatus === "connected" ? "本地 CLI 已连接：采集会自动生成中文摘要并重建 RAG 索引；GC 只提出清理建议，最终去留由你决定。" : "连接本地 CLI 后可运行完整的采集、摘要、RAG 索引与知识清洗流水线。"}</p>
       </section>}
 
       <footer>
         <div><span className="brand-mark">AW</span><strong>Agent Workbench</strong></div>
-        <p>AI summarizes. Evidence decides.</p>
-        <span>Git-backed · Human-reviewed · Agent-ready</span>
+        <p>AI summarizes. RAG recalls. GC cleans.</p>
+        <span>Git-backed · Private-by-design · Agent-ready</span>
       </footer>
 
       {settingsOpen && (
@@ -681,11 +763,11 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
           <section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" onMouseDown={(event) => event.stopPropagation()}>
             <div className="settings-topline"><span>PERSONAL WORKBENCH</span><button type="button" onClick={() => setSettingsOpen(false)} aria-label="关闭工作台设置">×</button></div>
             <h2 id="settings-title">配置你的工作台</h2>
-            <p className="settings-lede">来源、时间和过期策略可以手动设置。AI 导读、分类、联网核验与桌宠均复用本机 CLI 登录；长期数据始终以你自己的 GitHub Fork 为准。</p>
+            <p className="settings-lede">来源、时间和清洗策略可以手动设置。中文摘要、RAG 索引、知识清洗与桌宠均复用本机 CLI；长期数据始终以你自己的 GitHub Fork 为准。</p>
 
             <fieldset className="settings-group bridge-settings">
               <legend>本地 MCP 状态</legend>
-              <div className="bridge-heading"><div><strong>{bridgeStatus === "connected" ? "本地 CLI 已接管 AI 能力" : "等待一键安装命令完成"}</strong><p>{bridgeStatus === "connected" ? "导读、分类、证据核验、桌宠和个人调度均由本机执行。" : "无需在网页填写地址、凭据或 API Key；安装器会完成注册、启动和连接。"}</p></div><span className={`bridge-status bridge-${bridgeStatus}`}>{bridgeStatus === "connected" ? "已连接" : bridgeStatus === "connecting" ? "连接中" : bridgeStatus === "error" ? "连接失败" : "未连接"}</span></div>
+              <div className="bridge-heading"><div><strong>{bridgeStatus === "connected" ? "本地 CLI 已接管 AI 能力" : "等待一键安装命令完成"}</strong><p>{bridgeStatus === "connected" ? "中文摘要、RAG 召回、GC 清洗、桌宠和个人调度均由本机执行。" : "无需在网页填写地址、凭据或 API Key；安装器会完成注册、启动和连接。"}</p></div><span className={`bridge-status bridge-${bridgeStatus}`}>{bridgeStatus === "connected" ? "已连接" : bridgeStatus === "connecting" ? "连接中" : bridgeStatus === "error" ? "连接失败" : "未连接"}</span></div>
               {bridgeStatus === "connected" && <div className="bridge-actions"><button type="button" className="clear-button danger-button" onClick={() => void disconnectLocal()}>安全断开本地连接</button></div>}
               <p className="field-note">底层本地服务由安装器管理，只监听 127.0.0.1，使用随机端口和来源白名单，不接受任意 Shell 命令。</p>
             </fieldset>
@@ -706,20 +788,20 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
               <legend>个人定时计划</legend>
               <div className="settings-grid three-columns">
                 <label>每日雷达<input type="time" value={workspace.radarTime} onChange={(event) => setWorkspace((current) => ({ ...current, radarTime: event.target.value }))} /></label>
-                <label>每周复核<select value={workspace.auditDay} onChange={(event) => setWorkspace((current) => ({ ...current, auditDay: event.target.value }))}>{Object.entries(dayLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-                <label>复核时间<input type="time" value={workspace.auditTime} onChange={(event) => setWorkspace((current) => ({ ...current, auditTime: event.target.value }))} /></label>
-                <label>每月归档日<input type="number" min="1" max="28" value={workspace.gcDay} onChange={(event) => setWorkspace((current) => ({ ...current, gcDay: clamp(event.target.value, 1, 28, current.gcDay) }))} /></label>
-                <label>归档时间<input type="time" value={workspace.gcTime} onChange={(event) => setWorkspace((current) => ({ ...current, gcTime: event.target.value }))} /></label>
+                <label>每周轻量清洗<select value={workspace.auditDay} onChange={(event) => setWorkspace((current) => ({ ...current, auditDay: event.target.value }))}>{Object.entries(dayLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+                <label>轻量清洗时间<input type="time" value={workspace.auditTime} onChange={(event) => setWorkspace((current) => ({ ...current, auditTime: event.target.value }))} /></label>
+                <label>每月深度清洗日<input type="number" min="1" max="28" value={workspace.gcDay} onChange={(event) => setWorkspace((current) => ({ ...current, gcDay: clamp(event.target.value, 1, 28, current.gcDay) }))} /></label>
+                <label>深度清洗时间<input type="time" value={workspace.gcTime} onChange={(event) => setWorkspace((current) => ({ ...current, gcTime: event.target.value }))} /></label>
               </div>
               <p className="field-note">页面保持打开时，本地 CLI 会按个人时间运行；关闭页面后本地连接自动退出，你的 Fork 中的 GitHub Actions 继续维护知识。</p>
             </fieldset>
 
             <fieldset className="settings-group">
-              <legend>知识更新 / 过期策略</legend>
+              <legend>知识更新 / 清洗策略</legend>
               <div className="settings-grid">
                 <label>默认有效期（天）<input type="number" min="1" max="365" value={workspace.defaultTtlDays} onChange={(event) => setWorkspace((current) => ({ ...current, defaultTtlDays: clamp(event.target.value, 1, 365, current.defaultTtlDays) }))} /></label>
-                <label>提前复核（天）<input type="number" min="1" max="90" value={workspace.reviewWindowDays} onChange={(event) => setWorkspace((current) => ({ ...current, reviewWindowDays: clamp(event.target.value, 1, 90, current.reviewWindowDays) }))} /></label>
-                <label>过期后归档（天）<input type="number" min="1" max="365" value={workspace.archiveAfterDays} onChange={(event) => setWorkspace((current) => ({ ...current, archiveAfterDays: clamp(event.target.value, 1, 365, current.archiveAfterDays) }))} /></label>
+                <label>轻量清洗缓冲（天）<input type="number" min="1" max="90" value={workspace.reviewWindowDays} onChange={(event) => setWorkspace((current) => ({ ...current, reviewWindowDays: clamp(event.target.value, 1, 90, current.reviewWindowDays) }))} /></label>
+                <label>高龄知识保留缓冲（天）<input type="number" min="1" max="365" value={workspace.archiveAfterDays} onChange={(event) => setWorkspace((current) => ({ ...current, archiveAfterDays: clamp(event.target.value, 1, 365, current.archiveAfterDays) }))} /></label>
               </div>
             </fieldset>
 

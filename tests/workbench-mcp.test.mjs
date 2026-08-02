@@ -35,12 +35,12 @@ test("MCP lets a local CLI customize sources and knowledge in an isolated Fork w
     await client.connect(transport);
     const tools = await client.listTools();
     assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
-      "get_workbench_snapshot", "propose_knowledge_entry", "remove_watch_source", "rename_watch_category", "run_knowledge_routine",
-      "update_knowledge_entry", "update_workspace_settings", "upsert_watch_source",
+      "get_workbench_snapshot", "propose_knowledge_entry", "record_knowledge_access", "remove_watch_source", "rename_watch_category",
+      "resolve_cleanup_candidate", "run_knowledge_routine", "search_knowledge", "update_knowledge_entry", "update_workspace_settings", "upsert_watch_source",
     ]);
     const resources = await client.listResources();
     assert.deepEqual(resources.resources.map((resource) => resource.uri).sort(), [
-      "workbench://knowledge", "workbench://settings", "workbench://snapshot", "workbench://sources",
+      "workbench://index", "workbench://knowledge", "workbench://settings", "workbench://snapshot", "workbench://sources",
     ]);
     const sourceResource = await client.readResource({ uri: "workbench://sources" });
     assert.deepEqual(JSON.parse(sourceResource.contents[0].text), []);
@@ -56,19 +56,22 @@ test("MCP lets a local CLI customize sources and knowledge in an isolated Fork w
     await client.callTool({ name: "rename_watch_category", arguments: { from: "SDK", to: "Agent SDK" } });
     const proposed = await client.callTool({ name: "propose_knowledge_entry", arguments: {
       title: "Agent evaluation note", sourceType: "report", source: "Example Lab",
-      sourceUrl: "https://example.com/report", summary: "A sourced candidate for evaluation workflows.",
+      sourceUrl: "https://example.com/report", summary: "A sourced item for evaluation workflows.",
     } });
     const entryId = proposed.structuredContent.id;
     await client.callTool({ name: "update_knowledge_entry", arguments: {
-      id: entryId, impact: "Use this candidate when designing multi-Agent evaluation routes.", tags: ["eval", "multi-agent"],
+      id: entryId, impact: "Use this knowledge when designing multi-Agent evaluation routes.", tags: ["eval", "multi-agent"],
     } });
 
     const snapshotResult = await client.callTool({ name: "get_workbench_snapshot", arguments: {} });
     assert.equal(snapshotResult.structuredContent.sources[0].repo, "anthropics/anthropic-sdk-python");
     assert.equal(snapshotResult.structuredContent.sources[0].category, "Agent SDK");
     assert.equal(snapshotResult.structuredContent.entries[0].id, entryId);
-    assert.equal(snapshotResult.structuredContent.entries[0].status, "candidate");
+    assert.equal(snapshotResult.structuredContent.entries[0].status, "active");
     assert.deepEqual(snapshotResult.structuredContent.entries[0].tags, ["eval", "multi-agent"]);
+    const retrieved = await client.callTool({ name: "search_knowledge", arguments: { query: "multi-Agent evaluation", topK: 3 } });
+    assert.equal(retrieved.structuredContent.results[0].id, entryId);
+    await client.callTool({ name: "record_knowledge_access", arguments: { id: entryId } });
 
     await client.callTool({ name: "remove_watch_source", arguments: { id: "anthropic-sdk" } });
     const finalSources = JSON.parse(await readFile(path.join(worktree, "watchlist", "sources.json"), "utf8"));

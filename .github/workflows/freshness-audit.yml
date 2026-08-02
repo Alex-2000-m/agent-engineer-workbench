@@ -1,4 +1,4 @@
-name: Weekly knowledge freshness audit
+name: Weekly light knowledge GC
 
 on:
   schedule:
@@ -22,16 +22,16 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run knowledge:audit
-      - name: Propose freshness changes
+      - name: Propose light cleanup changes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if git diff --quiet; then exit 0; fi
-          branch="automation/freshness-audit-$(date -u +%Y%m%d)"
+          branch="automation/minor-gc-$(date -u +%Y%m%d)"
           git config user.name "agent-workbench[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B "$branch"
           git add knowledge/
-          git commit -m "audit knowledge freshness"
+          git commit -m "run light knowledge gc"
           git push --force-with-lease origin "$branch"
-          gh pr create --base "${{ github.event.repository.default_branch }}" --head "$branch" --title "Knowledge freshness audit $(date -u +%F)" --body "Automated status transitions based on each knowledge item's validity window." || true
+          gh pr create --base "${{ github.event.repository.default_branch }}" --head "$branch" --title "Light knowledge GC $(date -u +%F)" --body "Updates private retention metadata and moves eligible items to cleanup review; nothing is deleted automatically." || true

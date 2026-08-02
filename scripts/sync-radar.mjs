@@ -8,15 +8,18 @@ const settings = JSON.parse(await readFile(path.join(root, "workspace/settings.j
 const entriesPath = path.join(root, "knowledge/entries.json");
 const entries = JSON.parse(await readFile(entriesPath, "utf8"));
 const known = new Set(entries.map((entry) => entry.id));
+const existingById = new Map(entries.map((entry) => [entry.id, entry]));
+let refreshedExisting = 0;
 const now = new Date();
 const lookbackHours = Number(process.env.LOOKBACK_HOURS ?? 36);
 const cutoff = new Date(now.getTime() - lookbackHours * 60 * 60 * 1000);
 const token = process.env.GITHUB_TOKEN;
 const dryRun = process.env.DRY_RUN === "1";
+const queueOnly = process.env.QUEUE_ONLY === "1";
 const discovered = [];
 
-function decodeXml(value = "") {
-  const decodeEntities = (text) => text
+function decodeEntities(text) {
+  return text
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
     .replace(/&quot;/gi, '"')
@@ -25,6 +28,9 @@ function decodeXml(value = "") {
     .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(Number.parseInt(code, 16)))
     .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
     .replace(/&amp;/gi, "&");
+}
+
+function decodeXml(value = "") {
 
   let text = value.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1");
   // Feeds such as Google News HTML-encode their description markup. Decode
@@ -51,6 +57,21 @@ function feedLink(block) {
   return decodeXml(href || tag(block, ["link", "guid", "id"]));
 }
 
+function feedImage(block, pageUrl) {
+  let markup = block.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1");
+  for (let pass = 0; pass < 2; pass += 1) markup = decodeEntities(markup);
+  const value = markup.match(/<(?:media:content|media:thumbnail|enclosure)\b[^>]*(?:url|href)=["']([^"']+)["'][^>]*>/i)?.[1]
+    ?? markup.match(/<img\b[^>]*src=["']([^"']+)["'][^>]*>/i)?.[1]
+    ?? "";
+  if (!value) return "";
+  try {
+    const url = new URL(decodeEntities(value), pageUrl);
+    return ["http:", "https:"].includes(url.protocol) ? url.href : "";
+  } catch {
+    return "";
+  }
+}
+
 function idFor(prefix, value) {
   return `${prefix}-${createHash("sha256").update(value).digest("hex").slice(0, 16)}`;
 }
@@ -63,19 +84,23 @@ function candidate(source, item) {
     title: item.title,
     category: source.category,
     sourceType: source.sourceType,
-    status: "candidate",
+    status: "active",
+    generation: "young",
+    gcSurvivals: 0,
+    lastGcAt: "",
     confidence: "medium",
     freshnessClass: source.ttlDays <= 14 ? "fast" : "medium",
     source: item.source,
     sourceUrl: item.url,
     sourceVersion: item.version,
     observedAt: now.toISOString().slice(0, 10),
-    lastVerifiedAt: "",
+    lastSummarizedAt: "",
     validUntil: validUntil.toISOString().slice(0, 10),
-    summary: item.summary || "检测到新的来源变化，等待工程验证。",
-    impact: "候选变化尚未复现，不会自动升级为已验证知识。",
-    tags: [source.sourceType, source.category.toLowerCase(), "candidate"],
-    action: "核对原始来源并运行最小复现实验",
+    imageUrl: item.imageUrl || "",
+    summary: item.summary || "AI 中文摘要正在生成。",
+    impact: "本地 Agent 将在采集流程中自动整理工程影响。",
+    tags: [source.sourceType, source.category.toLowerCase()],
+    action: "阅读 AI 摘要或直达原文。",
   };
 }
 
@@ -99,6 +124,7 @@ async function githubReleases(source) {
         source: source.repo,
         url: release.html_url,
         version: release.tag_name,
+        imageUrl: "",
         summary: decodeXml(String(release.body ?? "")).slice(0, 320),
       };
     })
@@ -123,6 +149,7 @@ async function rssItems(source) {
         source: source.name,
         url,
         version: Number.isNaN(publishedAt.getTime()) ? "feed" : `feed@${publishedAt.toISOString().slice(0, 10)}`,
+        imageUrl: feedImage(block, url),
         summary: summary.slice(0, 320),
       };
     })
@@ -137,7 +164,20 @@ for (const source of watchlist) {
   try {
     const items = source.adapter === "rss" ? await rssItems(source) : await githubReleases(source);
     for (const item of items) {
-      if (known.has(item.id)) continue;
+      if (known.has(item.id)) {
+        const existing = existingById.get(item.id);
+        if (existing && !["cleanup", "archived"].includes(existing.status)) {
+          if (existing.status !== "active") { existing.status = "active"; refreshedExisting += 1; }
+          if (!existing.generation) existing.generation = "young";
+          if (!Number.isFinite(existing.gcAge)) existing.gcAge = Number(existing.gcSurvivals ?? 0);
+          if (!Number.isFinite(existing.accessCount)) existing.accessCount = 0;
+          if (typeof existing.lastAccessedAt !== "string") existing.lastAccessedAt = "";
+          if (typeof existing.lastGcAt !== "string") existing.lastGcAt = "";
+          if (typeof existing.lastSummarizedAt !== "string") existing.lastSummarizedAt = "";
+          if (item.imageUrl && existing.imageUrl !== item.imageUrl) { existing.imageUrl = item.imageUrl; refreshedExisting += 1; }
+        }
+        continue;
+      }
       discovered.push(candidate(source, item));
       known.add(item.id);
     }
@@ -146,9 +186,9 @@ for (const source of watchlist) {
   }
 }
 
-if (!dryRun && discovered.length) await writeFile(entriesPath, `${JSON.stringify([...discovered, ...entries], null, 2)}\n`);
+if (!dryRun && !queueOnly && (discovered.length || refreshedExisting)) await writeFile(entriesPath, `${JSON.stringify([...discovered, ...entries], null, 2)}\n`);
 if (!dryRun) {
   await mkdir(path.join(root, "knowledge/reports"), { recursive: true });
   await writeFile(path.join(root, "knowledge/reports/radar-latest.json"), `${JSON.stringify({ generatedAt: now.toISOString(), discovered }, null, 2)}\n`);
 }
-console.log(`${dryRun ? "Dry run discovered" : "Discovered"} ${discovered.length} multi-source signal(s).`);
+console.log(`${dryRun ? "Dry run discovered" : queueOnly ? "Queued" : "Discovered"} ${discovered.length} multi-source signal(s); refreshed ${refreshedExisting} existing field(s).`);
