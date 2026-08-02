@@ -22,7 +22,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run knowledge:gc
-      - name: Propose archive changes
+      - name: Propose deep cleanup changes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -32,6 +32,6 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B "$branch"
           git add knowledge/
-          git commit -m "archive expired knowledge"
+          git commit -m "run deep knowledge gc"
           git push --force-with-lease origin "$branch"
-          gh pr create --base "${{ github.event.repository.default_branch }}" --head "$branch" --title "Monthly knowledge GC $(date -u +%F)" --body "Moves long-expired entries out of the active index while preserving their audit history." || true
+          gh pr create --base "${{ github.event.repository.default_branch }}" --head "$branch" --title "Monthly knowledge GC $(date -u +%F)" --body "Proposes duplicate or expired items for cleanup review. The user decides whether to keep or archive each item." || true

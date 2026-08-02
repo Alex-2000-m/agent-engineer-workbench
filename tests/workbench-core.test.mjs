@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { defaultSettings, getDueRoutines, getSnapshot, normalizeSettings, normalizeWatchSource, runLocalEnhancement } from "../scripts/workbench-core.mjs";
 import { githubPagesUrl, parseGitHubRemote } from "../scripts/workbench-repository.mjs";
+import { tokenizeKnowledge } from "../scripts/knowledge-index.mjs";
 
 test("normalizes local Agent patches without letting null values erase policy", () => {
   const normalized = normalizeSettings({
@@ -57,4 +58,11 @@ test("installer derives Pages from the user's own Fork remote", () => {
   assert.deepEqual(parseGitHubRemote("git@github.com:bob/agent-engineer-workbench.git"), { owner: "bob", name: "agent-engineer-workbench" });
   assert.equal(githubPagesUrl({ owner: "alice", name: "my-workbench" }), "https://alice.github.io/my-workbench/");
   assert.throws(() => parseGitHubRemote("https://example.com/alice/repo.git"), /GitHub Fork/);
+});
+
+test("personal RAG index tokenizes Chinese concepts and English identifiers", () => {
+  const tokens = tokenizeKnowledge("多智能体评测 with MCP tool-routing");
+  assert.ok(tokens.includes("智能"));
+  assert.ok(tokens.includes("mcp"));
+  assert.ok(tokens.includes("tool-routing"));
 });

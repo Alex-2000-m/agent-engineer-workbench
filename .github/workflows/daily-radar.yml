@@ -21,9 +21,11 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run knowledge:sync
+      - name: Queue source changes for the user's local AI pipeline
+        run: node scripts/sync-radar.mjs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          QUEUE_ONLY: "1"
       - name: Propose knowledge changes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -33,7 +35,7 @@ jobs:
           git config user.name "agent-workbench[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B "$branch"
-          git add knowledge/
-          git commit -m "refresh daily agent radar"
+          git add knowledge/reports/
+          git commit -m "queue daily agent radar"
           git push --force-with-lease origin "$branch"
-          gh pr create --base "${{ github.event.repository.default_branch }}" --head "$branch" --title "Daily agent radar $(date -u +%F)" --body "Automated release signals. Candidate knowledge still requires human verification." || true
+          gh pr create --base "${{ github.event.repository.default_branch }}" --head "$branch" --title "Daily agent radar $(date -u +%F)" --body "Queues source changes only. The local Codex pipeline creates Chinese summaries and the RAG index before items enter the active library." || true

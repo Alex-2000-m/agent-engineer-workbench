@@ -1,5 +1,6 @@
 export type Guide = {
   summary: string;
+  highlights: string[];
   impact: string;
   action: string;
   model: string;

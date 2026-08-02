@@ -8,13 +8,19 @@
         "properties": {
           "id": { "type": "string" },
           "summary": { "type": "string" },
+          "highlights": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 5,
+            "items": { "type": "string" }
+          },
           "impact": { "type": "string" },
           "action": { "type": "string" },
           "category": { "type": "string" },
           "verification": { "enum": ["supported", "needs_review", "conflict", "insufficient"] },
           "verificationNote": { "type": "string" }
         },
-        "required": ["id", "summary", "impact", "action", "category", "verification", "verificationNote"],
+        "required": ["id", "summary", "highlights", "impact", "action", "category", "verification", "verificationNote"],
         "additionalProperties": false
       }
     }

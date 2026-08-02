@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createServer } from "node:http";
-import { getDueRoutines, getSnapshot, readSettings, runLocalAgent, runLocalEnhancement, runRoutine, updateSettings } from "./workbench-core.mjs";
+import { getDueRoutines, getSnapshot, readSettings, recordKnowledgeAccess, resolveCleanupCandidate, runLocalAgent, runLocalEnhancement, runRoutine, updateSettings } from "./workbench-core.mjs";
+import { searchKnowledge } from "./knowledge-index.mjs";
 
 const host = "127.0.0.1";
 const port = Number(process.env.WORKBENCH_BRIDGE_PORT || 4317);
@@ -90,6 +91,18 @@ const server = createServer(async (request, response) => {
       const body = await readBody(request);
       return respond(response, 200, await runLocalEnhancement(body.entryIds), origin);
     }
+    if (request.method === "POST" && url.pathname === "/knowledge/access") {
+      const body = await readBody(request);
+      return respond(response, 200, { entry: await recordKnowledgeAccess(body.id) }, origin);
+    }
+    if (request.method === "POST" && url.pathname === "/search") {
+      const body = await readBody(request);
+      return respond(response, 200, { results: await searchKnowledge(body.query, body.topK) }, origin);
+    }
+    if (request.method === "POST" && url.pathname === "/knowledge/cleanup") {
+      const body = await readBody(request);
+      return respond(response, 200, { entry: await resolveCleanupCandidate(body.id, body.decision), snapshot: await getSnapshot() }, origin);
+    }
     if (request.method === "POST" && url.pathname === "/disconnect") {
       respond(response, 200, { ok: true, disconnected: true }, origin);
       setTimeout(() => shutdown("explicit disconnect"), 100);
@@ -101,7 +114,21 @@ const server = createServer(async (request, response) => {
     }
     return respond(response, 404, { error: "Not found" }, origin);
   } catch (error) {
-    return respond(response, 500, { error: error instanceof Error ? error.message : String(error) }, origin);
+    const pathname = (() => { try { return new URL(request.url ?? "/", `http://${host}:${port}`).pathname; } catch { return "/"; } })();
+    const code = pathname === "/enhance" || pathname === "/agent" ? "LOCAL_AI_FAILED"
+      : pathname.startsWith("/actions/") ? "ROUTINE_FAILED"
+        : pathname === "/search" ? "SEARCH_FAILED"
+          : pathname.startsWith("/knowledge/") ? "KNOWLEDGE_ACTION_FAILED"
+          : "LOCAL_SERVICE_FAILED";
+    const messages = {
+      LOCAL_AI_FAILED: "本地 AI 暂时没有完成这次处理，请稍后重试。",
+      ROUTINE_FAILED: "本地知识任务没有完成，请稍后重试。",
+      KNOWLEDGE_ACTION_FAILED: "知识操作没有完成，请刷新后重试。",
+      SEARCH_FAILED: "个人知识检索暂时不可用，请稍后重试。",
+      LOCAL_SERVICE_FAILED: "本地能力暂时不可用，请稍后重试。",
+    };
+    process.stderr.write(`[bridge:error] ${request.method} ${pathname}\n${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+    return respond(response, 500, { code, error: messages[code] }, origin);
   }
 });
 
