@@ -6,7 +6,7 @@ import { getSnapshot, proposeKnowledge, runRoutine, updateSettings } from "./wor
 
 const server = new McpServer(
   { name: "agent-engineer-workbench", version: "0.2.0" },
-  { instructions: "Read get_workbench_snapshot before changing the workbench. New knowledge must enter as candidate. Never mark knowledge verified automatically. Use only the named maintenance routines; no arbitrary shell execution is available." },
+  { instructions: "This MCP edits the current user's GitHub Fork worktree. Read get_workbench_snapshot before changing it. New knowledge must enter as candidate. Never mark knowledge verified automatically. Use only the named maintenance routines; no arbitrary shell execution is available. Show the Git diff and let the user review before commit or push." },
 );
 
 const jsonResult = (value) => ({
@@ -16,7 +16,7 @@ const jsonResult = (value) => ({
 
 server.registerTool("get_workbench_snapshot", {
   title: "Get workbench snapshot",
-  description: "Read current knowledge entries, watched sources, and workspace settings.",
+  description: "Read knowledge entries, guides, watched sources, and settings from the current user's Fork worktree.",
   inputSchema: {},
   annotations: { readOnlyHint: true, openWorldHint: false },
 }, async () => jsonResult(await getSnapshot()));

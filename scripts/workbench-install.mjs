@@ -6,11 +6,11 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { githubPagesUrl, parseGitHubRemote } from "./workbench-repository.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const runtimeDir = path.join(os.homedir(), ".agent-workbench-runtime");
 const logPath = path.join(runtimeDir, "bridge.log");
-const siteUrl = "https://alex-2000-m.github.io/agent-engineer-workbench/";
 
 function run(command, args, { allowFailure = false } = {}) {
   return new Promise((resolve, reject) => {
@@ -23,11 +23,28 @@ function run(command, args, { allowFailure = false } = {}) {
   });
 }
 
+function capture(command, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", reject);
+    child.on("close", (code) => code === 0 ? resolve(stdout.trim()) : reject(new Error(stderr.trim() || `${command} exited with ${code}`)));
+  });
+}
+
+const originRemote = await capture("git", ["remote", "get-url", "origin"]);
+const repository = parseGitHubRemote(originRemote);
+const defaultSiteUrl = githubPagesUrl(repository);
+const siteUrl = process.env.WORKBENCH_SITE_URL || defaultSiteUrl;
+
 async function isHealthy(connection) {
   if (!connection?.bridge) return false;
   try {
     const response = await fetch(`${connection.bridge}/health`, {
-      headers: { Origin: "https://alex-2000-m.github.io" },
+      headers: { Origin: new URL(siteUrl).origin },
     });
     return response.ok;
   } catch {
@@ -43,7 +60,7 @@ async function startBridge() {
     const child = spawn(process.execPath, [path.join(root, "scripts", "workbench-bridge.mjs")], {
       cwd: root,
       detached: true,
-      env: { ...process.env, WORKBENCH_BRIDGE_PORT: String(port) },
+      env: { ...process.env, WORKBENCH_BRIDGE_PORT: String(port), WORKBENCH_SITE_URL: siteUrl },
       stdio: ["ignore", log, log],
     });
     child.unref();

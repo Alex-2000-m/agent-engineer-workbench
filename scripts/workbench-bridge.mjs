@@ -4,8 +4,8 @@ import { getDueRoutines, getSnapshot, readSettings, runLocalAgent, runLocalEnhan
 
 const host = "127.0.0.1";
 const port = Number(process.env.WORKBENCH_BRIDGE_PORT || 4317);
-const productionOrigin = "https://alex-2000-m.github.io";
-const siteUrl = process.env.WORKBENCH_SITE_URL || `${productionOrigin}/agent-engineer-workbench/`;
+const siteUrl = process.env.WORKBENCH_SITE_URL || "https://alex-2000-m.github.io/agent-engineer-workbench/";
+const productionOrigin = new URL(siteUrl).origin;
 const scheduledRuns = new Set();
 const runningRoutines = new Set();
 const connectionLeaseMs = Number(process.env.WORKBENCH_CONNECTION_LEASE_MS || 30_000);
@@ -88,7 +88,7 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === "POST" && url.pathname === "/enhance") {
       const body = await readBody(request);
-      return respond(response, 200, await runLocalEnhancement(body.entries), origin);
+      return respond(response, 200, await runLocalEnhancement(body.entryIds), origin);
     }
     if (request.method === "POST" && url.pathname === "/disconnect") {
       respond(response, 200, { ok: true, disconnected: true }, origin);

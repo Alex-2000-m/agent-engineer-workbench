@@ -24,6 +24,7 @@ main { min-height: 100vh; overflow: hidden; }
 .brand-mark { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--ink); color: var(--lime); font-size: 11px; letter-spacing: 0.08em; }
 nav { display: flex; gap: 30px; font-size: 13px; font-weight: 650; }
 nav a:hover { opacity: .55; }
+nav a.active { border-bottom: 2px solid var(--acid, #789442); }
 .sync-pill { border: 1px solid var(--line); border-radius: 999px; padding: 9px 13px; font: 600 11px ui-monospace, SFMono-Regular, Menlo, monospace; display: flex; gap: 8px; align-items: center; }
 .sync-pill span { width: 7px; height: 7px; border-radius: 50%; background: #42a46e; box-shadow: 0 0 0 4px rgba(66,164,110,.12); }
 .sync-pill.bridge-live { background: var(--lime); border-color: #789442; }
@@ -53,6 +54,14 @@ h1 em { font-family: Georgia, "Times New Roman", serif; font-weight: 400; color:
 .text-button { border: 0; border-bottom: 1px solid var(--ink); padding: 0 0 3px; background: transparent; font-size: 13px; font-weight: 700; cursor: pointer; }
 
 .quickstart-hero { min-height: 700px; align-items: center; }
+.quickstart-page .quickstart-hero { min-height: calc(100vh - 76px); }
+.page-section { min-height: calc(100vh - 170px); }
+.dashboard-metrics { margin-top: clamp(40px, 7vw, 96px); }
+.dashboard-empty { grid-column: 1 / -1; }
+.dashboard-empty strong { display: block; margin-bottom: 8px; font-size: 20px; }
+.dashboard-empty p { margin: 0 0 14px; color: var(--muted); }
+.dashboard-empty a { color: var(--ink); font-weight: 750; }
+.policy-button { margin-top: 28px; border: 0; cursor: pointer; }
 .quickstart-hero .hero-copy { animation: quickstart-enter .55s ease-out both; }
 .quickstart-status { width: fit-content; margin-top: 28px; padding: 11px 14px; border: 1px solid var(--line); border-radius: 8px; display: flex; align-items: center; gap: 11px; background: rgba(255,255,255,.34); }
 .quickstart-status > span { width: 10px; height: 10px; border-radius: 50%; background: #9b8a75; }
@@ -74,6 +83,11 @@ h1 em { font-family: Georgia, "Times New Roman", serif; font-weight: 400; color:
 .setup-step code { max-height: 74px; margin-top: 9px; padding: 9px 10px; border-radius: 5px; display: block; overflow: auto; background: #263129; color: #d8e4db; font: 9px/1.55 ui-monospace, monospace; word-break: break-all; }
 .setup-step > button { border: 1px solid rgba(255,255,255,.22); border-radius: 5px; padding: 7px 9px; background: transparent; color: #fff; cursor: pointer; font-size: 9px; }
 .setup-step > button:hover { border-color: var(--lime); color: var(--lime); }
+.setup-step > button:disabled { cursor: not-allowed; opacity: .45; }
+.fork-step input { width: 100%; margin-top: 10px; padding: 11px 12px; border: 1px solid rgba(245,245,239,.24); border-radius: 7px; background: rgba(255,255,255,.06); color: #fff; font: inherit; }
+.fork-step input::placeholder { color: rgba(255,255,255,.42); }
+.fork-step .input-error { display: block; margin-top: 6px; color: #ffab91; }
+.console-error { margin: 12px 0 0; color: #ffab91; font-size: 10px; }
 .setup-flow { position: relative; margin-top: 20px; padding-top: 16px; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #9da9a1; font: 750 8px ui-monospace, monospace; overflow: hidden; }
 .setup-flow::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(217,255,114,.5), transparent); }
 .setup-flow i { color: var(--lime); font-style: normal; }
@@ -234,6 +248,13 @@ footer > div { display: flex; align-items: center; gap: 10px; }
 footer p { text-align: center; color: var(--muted); }
 footer > span { text-align: right; font: 9px ui-monospace, monospace; color: var(--muted); }
 
+.tutorial-notes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; padding: 1px; background: var(--line); }
+.tutorial-notes article { padding: clamp(28px, 4vw, 56px); background: var(--paper); }
+.tutorial-notes article > span { color: #607a2f; font-family: ui-monospace, monospace; font-size: 12px; }
+.tutorial-notes h2 { margin: 18px 0 12px; font-size: clamp(22px, 2.6vw, 34px); letter-spacing: -.04em; }
+.tutorial-notes p { margin: 0; color: var(--muted); line-height: 1.75; }
+.tutorial-notes code { font-family: ui-monospace, monospace; font-size: .88em; }
+
 .modal-backdrop { position: fixed; inset: 0; z-index: 80; padding: 24px; display: grid; place-items: center; background: rgba(10,18,13,.72); backdrop-filter: blur(9px); }
 .settings-dialog { width: min(860px, 100%); max-height: calc(100vh - 48px); overflow: auto; border-radius: 12px; padding: 30px; background: var(--cream); box-shadow: 0 28px 90px rgba(0,0,0,.3); }
 .settings-topline { display: flex; justify-content: space-between; align-items: center; color: #637168; font: 800 9px ui-monospace, monospace; letter-spacing: .14em; }
@@ -299,7 +320,7 @@ footer > span { text-align: right; font: 9px ui-monospace, monospace; color: var
 .pet-chat form button:disabled { opacity: .4; }
 
 @media (max-width: 900px) {
-  nav { display: none; }
+  nav { min-width: 0; gap: 18px; overflow-x: auto; white-space: nowrap; }
   .sync-pill { display: none; }
   .hero { grid-template-columns: 1fr; padding-top: 60px; }
   .quickstart-console { width: 100%; }
@@ -317,13 +338,15 @@ footer > span { text-align: right; font: 9px ui-monospace, monospace; color: var
 @media (max-width: 620px) {
   .site-header { height: 66px; padding-inline: 18px; }
   .brand > span:last-child { display: none; }
-  .ai-config-button { max-width: 150px; font-size: 9px; }
+  nav { gap: 14px; font-size: 10px; }
+  .ai-config-button { display: none; }
   .mode-strip { padding-inline: 18px; }
   .mode-strip > button { width: 100%; margin-left: 0; text-align: left; }
   .hero { min-height: auto; padding: 52px 22px 80px; }
   h1 { font-size: 51px; }
   .hero-actions { align-items: flex-start; flex-direction: column; }
   .quickstart-console { padding: 18px; }
+  .tutorial-notes { grid-template-columns: 1fr; }
   .setup-step { grid-template-columns: 28px minmax(0, 1fr); }
   .setup-step > button { grid-column: 2; width: fit-content; }
   .setup-flow { font-size: 7px; }

@@ -6,18 +6,18 @@ const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000/";
 export const metadata: Metadata = {
   title: "Agent Workbench · 智能体工程知识工作台",
   description:
-    "一键安装本地 MCP，用本机 CLI 驱动 Agent 工程知识导读、分类、核验与维护。",
+    "Fork 一套多页面 Agent 工程工作台，用自己的 GitHub 托管知识，并由本机 CLI 驱动 AI 能力。",
   metadataBase: new URL(siteUrl),
   openGraph: {
     title: "Agent Workbench",
-    description: "GitHub 托管知识，本地 CLI 完成 AI 导读、分类、核验与维护。",
-    images: ["og.png"],
+    description: "框架共用，知识归你的 GitHub Fork；本地 CLI 完成 AI 导读、分类与核验。",
+    images: ["og-fork.png"],
   },
   twitter: {
     card: "summary_large_image",
     title: "Agent Workbench",
-    description: "GitHub 托管知识，本地 CLI 完成 AI 导读、分类、核验与维护。",
-    images: ["og.png"],
+    description: "框架共用，知识归你的 GitHub Fork；本地 CLI 完成 AI 导读、分类与核验。",
+    images: ["og-fork.png"],
   },
 };
 

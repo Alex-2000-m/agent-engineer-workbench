@@ -4,13 +4,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const localDir = path.join(root, ".agent-workbench");
-const settingsPath = path.join(localDir, "settings.json");
+const settingsPath = path.join(root, "workspace", "settings.json");
 const entriesPath = path.join(root, "knowledge", "entries.json");
 const watchlistPath = path.join(root, "watchlist", "sources.json");
 const agentSchemaPath = path.join(root, "scripts", "workbench-agent-schema.json");
 const guideSchemaPath = path.join(root, "scripts", "workbench-guide-schema.json");
-const guidesPath = path.join(localDir, "guides.json");
+const guidesPath = path.join(root, "knowledge", "guides.json");
 
 export const defaultSettings = {
   enabledSources: ["github", "blog", "report", "news", "web"],
@@ -208,12 +207,17 @@ export async function runLocalAgent(message) {
   return { reply: result.reply, settings, routineResults, snapshot: await getSnapshot() };
 }
 
-export async function runLocalEnhancement(inputEntries) {
-  if (!Array.isArray(inputEntries) || inputEntries.length < 1 || inputEntries.length > 20) {
-    throw new Error("entries must contain between 1 and 20 hosted knowledge items");
+export async function runLocalEnhancement(inputIds) {
+  if (!Array.isArray(inputIds) || inputIds.length < 1 || inputIds.length > 20) {
+    throw new Error("entryIds must contain between 1 and 20 personal knowledge IDs");
   }
-  const sanitized = inputEntries.map((entry) => {
-    if (!entry || typeof entry !== "object") throw new Error("invalid knowledge entry");
+  const requestedIds = new Set(inputIds.map((id) => typeof id === "string" ? id.trim() : "").filter(Boolean));
+  if (requestedIds.size !== inputIds.length) throw new Error("entryIds must be unique non-empty strings");
+  const repositoryEntries = await readJson(entriesPath, []);
+  const selectedEntries = repositoryEntries.filter((entry) => requestedIds.has(entry?.id));
+  if (selectedEntries.length !== requestedIds.size) throw new Error("one or more personal knowledge IDs were not found");
+  const sanitized = selectedEntries.map((entry) => {
+    if (!entry || typeof entry !== "object") throw new Error("invalid personal knowledge entry");
     for (const field of ["id", "title", "source", "sourceType", "sourceVersion", "sourceUrl", "summary"]) {
       if (typeof entry[field] !== "string" || !entry[field].trim()) throw new Error(`${field} is required`);
     }
@@ -238,7 +242,7 @@ export async function runLocalEnhancement(inputEntries) {
     "必须使用联网搜索打开 sourceUrl，并优先用发布者文档、代码仓库、论文等一手来源交叉核对关键主张。",
     "为每个输入 id 返回一条结果：中文两句导读、工程影响、建议动作、简短类别，以及证据状态 supported/needs_review/conflict/insufficient 和证据说明。",
     "AI 结果只是核验建议，不得声称已完成人工验证，不得把 candidate 升级为 verified。输出必须符合 JSON Schema。",
-    `待处理的 GitHub 托管知识：${JSON.stringify(sanitized)}`,
+    `待处理的当前用户 GitHub 仓库知识：${JSON.stringify(sanitized)}`,
   ].join("\n"), guideSchemaPath, 240_000, true);
   const guides = {};
   for (const raw of result.guides ?? []) {
