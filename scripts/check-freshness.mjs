@@ -4,13 +4,14 @@ import path from "node:path";
 const root = process.cwd();
 const entriesPath = path.join(root, "knowledge/entries.json");
 const entries = JSON.parse(await readFile(entriesPath, "utf8"));
+const settings = JSON.parse(await readFile(path.join(root, "workspace/settings.json"), "utf8"));
 const today = new Date(process.env.AUDIT_DATE ? `${process.env.AUDIT_DATE}T00:00:00Z` : Date.now());
 const changes = [];
 
 for (const entry of entries) {
   if (["archived", "quarantined", "candidate"].includes(entry.status)) continue;
   const daysRemaining = Math.ceil((new Date(`${entry.validUntil}T00:00:00Z`) - today) / 86_400_000);
-  const nextStatus = daysRemaining < 0 ? "stale" : daysRemaining <= 7 ? "review" : "verified";
+  const nextStatus = daysRemaining < 0 ? "stale" : daysRemaining <= settings.reviewWindowDays ? "review" : "verified";
   if (entry.status !== nextStatus) {
     changes.push({ id: entry.id, from: entry.status, to: nextStatus, daysRemaining });
     entry.status = nextStatus;

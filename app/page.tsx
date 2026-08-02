@@ -1,6 +1,5 @@
-import entries from "@/knowledge/entries.json";
-import { Workbench, type KnowledgeEntry } from "./workbench";
+import { WorkbenchPage } from "./workbench-page";
 
 export default function Home() {
-  return <Workbench entries={entries as KnowledgeEntry[]} />;
+  return <WorkbenchPage view="dashboard" />;
 }

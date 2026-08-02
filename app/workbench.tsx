@@ -1,12 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type Guide, type WorkspacePatch } from "./ai-guide";
 
 type KnowledgeStatus = "verified" | "candidate" | "review" | "stale" | "archived" | "quarantined";
 type SourceType = "github" | "blog" | "report" | "news" | "web";
 
-type WorkspaceSettings = {
+export type WorkspaceSettings = {
   enabledSources: SourceType[];
   radarTime: string;
   auditDay: string;
@@ -21,6 +22,7 @@ type WorkspaceSettings = {
 type BridgeSnapshot = {
   updatedAt: string;
   settings: WorkspaceSettings;
+  entries?: KnowledgeEntry[];
   guides?: Record<string, Guide & { sourceVersion?: string }>;
 };
 
@@ -175,14 +177,16 @@ function applyFreshnessPolicy(entry: KnowledgeEntry, settings: WorkspaceSettings
   return { ...entry, status: "verified" };
 }
 
-export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
+type WorkbenchView = "dashboard" | "knowledge" | "sources" | "automation";
+
+export function Workbench({ entries, initialGuides, initialSettings = defaultWorkspaceSettings, view = "dashboard" }: { entries: KnowledgeEntry[]; initialGuides: Record<string, Guide>; initialSettings?: WorkspaceSettings; view?: WorkbenchView }) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | KnowledgeStatus>("all");
   const [sourceFilter, setSourceFilter] = useState<"all" | SourceType>("all");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [workspace, setWorkspace] = useState(defaultWorkspaceSettings);
-  const [workspaceLoaded, setWorkspaceLoaded] = useState(false);
-  const [guides, setGuides] = useState<Record<string, Guide>>({});
+  const [workspace, setWorkspace] = useState(initialSettings);
+  const [knowledgeEntries, setKnowledgeEntries] = useState(entries);
+  const [guides, setGuides] = useState<Record<string, Guide>>(initialGuides);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [autoProgress, setAutoProgress] = useState<{ done: number; total: number } | null>(null);
   const [notice, setNotice] = useState("");
@@ -193,39 +197,18 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
   const [bridgeStatus, setBridgeStatus] = useState<"disconnected" | "connecting" | "connected" | "error">("disconnected");
   const [bridgeUpdatedAt, setBridgeUpdatedAt] = useState("");
   const [bridgeRoutine, setBridgeRoutine] = useState<string | null>(null);
-  const [copiedCommand, setCopiedCommand] = useState(false);
   const [petMessages, setPetMessages] = useState<Array<{ role: "agent" | "user"; text: string }>>([
     { role: "agent", text: "我是你的工作台 Agent。告诉我想关注哪些来源、几点更新，或知识多久复核一次。" },
   ]);
   const attemptedInitialConnection = useRef(false);
   const repositoryUrl = process.env.NEXT_PUBLIC_REPOSITORY_URL ?? "https://github.com";
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
   const aiEnabled = bridgeStatus === "connected";
-  const installCommand = "sh -c 'D=\"$HOME/.agent-engineer-workbench\"; if [ -d \"$D/.git\" ]; then git -C \"$D\" pull --ff-only; else git clone https://github.com/Alex-2000-m/agent-engineer-workbench.git \"$D\"; fi; npm --prefix \"$D\" install && node \"$D/scripts/workbench-install.mjs\"'";
-
-  const copyInstallCommand = async () => {
-    try {
-      await navigator.clipboard.writeText(installCommand);
-      setCopiedCommand(true);
-      window.setTimeout(() => setCopiedCommand(false), 2_000);
-    } catch {
-      setNotice("浏览器无法访问剪贴板，请手动选择命令复制。");
-    }
-  };
 
   useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem("agent-workbench-settings-v1");
-      if (saved) setWorkspace((current) => applyWorkspacePatch(current, JSON.parse(saved) as WorkspacePatch));
-    } catch {
-      // Ignore malformed device-local preferences and keep safe defaults.
-    } finally {
-      setWorkspaceLoaded(true);
-    }
+    const requestedSource = new URLSearchParams(window.location.search).get("source");
+    if (requestedSource && sourceTypes.some((source) => source.id === requestedSource)) setSourceFilter(requestedSource as SourceType);
   }, []);
-
-  useEffect(() => {
-    if (workspaceLoaded) window.localStorage.setItem("agent-workbench-settings-v1", JSON.stringify(workspace));
-  }, [workspace, workspaceLoaded]);
 
   const bridgeRequest = useCallback(async (path: string, init?: RequestInit, connection?: { url: string }) => {
     const url = new URL(connection?.url ?? bridgeUrl);
@@ -247,15 +230,17 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
 
   const applyBridgeSnapshot = useCallback((snapshot: BridgeSnapshot) => {
     if (snapshot.settings) setWorkspace((current) => applyWorkspacePatch(current, snapshot.settings));
+    if (snapshot.entries) setKnowledgeEntries(snapshot.entries);
     if (snapshot.guides) {
-      const hostedVersions = new Map(entries.map((entry) => [entry.id, entry.sourceVersion]));
+      const currentEntries = snapshot.entries ?? knowledgeEntries;
+      const forkVersions = new Map(currentEntries.map((entry) => [entry.id, entry.sourceVersion]));
       const compatible = Object.fromEntries(Object.entries(snapshot.guides).filter(([id, guide]) => (
-        hostedVersions.has(id) && (!guide.sourceVersion || guide.sourceVersion === hostedVersions.get(id))
+        forkVersions.has(id) && (!guide.sourceVersion || guide.sourceVersion === forkVersions.get(id))
       )));
       setGuides((current) => ({ ...current, ...compatible }));
     }
     setBridgeUpdatedAt(snapshot.updatedAt || new Date().toISOString());
-  }, [entries]);
+  }, [knowledgeEntries]);
 
   const enhanceLocally = useCallback(async (targets: KnowledgeEntry[], connection?: { url: string }) => {
     if (!targets.length) return;
@@ -263,7 +248,7 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
     try {
       const result = await bridgeRequest("/enhance", {
         method: "POST",
-        body: JSON.stringify({ entries: targets }),
+        body: JSON.stringify({ entryIds: targets.map((entry) => entry.id) }),
       }, connection) as { guides?: Record<string, Guide>; snapshot?: BridgeSnapshot };
       if (result.guides) setGuides((current) => ({ ...current, ...result.guides }));
       if (result.snapshot) applyBridgeSnapshot(result.snapshot);
@@ -286,7 +271,8 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
       setBridgeStatus("connected");
       if (!quiet) setNotice("本地 CLI 已连接。网站知识仍来自 GitHub，本地 CLI 正在提供 AI 增强与控制能力。");
       const cached = snapshot.guides ?? {};
-      const targets = entries.filter((entry) => entry.status !== "archived" && !(
+      const currentEntries = snapshot.entries ?? [];
+      const targets = currentEntries.filter((entry) => entry.status !== "archived" && !(
         cached[entry.id] && (!cached[entry.id].sourceVersion || cached[entry.id].sourceVersion === entry.sourceVersion)
       ));
       if (targets.length) void enhanceLocally(targets.slice(0, 20), { url: nextUrl }).catch((error) => {
@@ -296,7 +282,7 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
       setBridgeStatus("error");
       if (!quiet) setNotice(error instanceof Error ? `${error.message}；若浏览器询问本地网络访问，请选择允许。` : "无法连接本地服务；若浏览器询问本地网络访问，请选择允许。");
     }
-  }, [applyBridgeSnapshot, bridgeRequest, bridgeUrl, enhanceLocally, entries]);
+  }, [applyBridgeSnapshot, bridgeRequest, bridgeUrl, enhanceLocally]);
 
   useEffect(() => {
     if (attemptedInitialConnection.current) return;
@@ -321,12 +307,14 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
       } catch {
         setBridgeStatus("error");
         window.sessionStorage.removeItem("agent-workbench-local-url");
+        setKnowledgeEntries(entries);
+        setGuides(initialGuides);
       }
     }, 5_000);
     return () => window.clearInterval(timer);
-  }, [applyBridgeSnapshot, bridgeRequest, bridgeStatus]);
+  }, [applyBridgeSnapshot, bridgeRequest, bridgeStatus, entries, initialGuides]);
 
-  const policyEntries = entries.map((entry) => applyFreshnessPolicy(entry, workspace));
+  const policyEntries = knowledgeEntries.map((entry) => applyFreshnessPolicy(entry, workspace));
   const activeEntries = policyEntries.filter((entry) => entry.status !== "archived" && workspace.enabledSources.includes(entry.sourceType));
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -347,8 +335,8 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
 
   const generateGuide = async (entry: KnowledgeEntry) => {
     if (bridgeStatus !== "connected") {
-      setNotice("请先运行首页的一键安装命令，再生成导读、分类和证据核验。");
-      document.getElementById("quickstart")?.scrollIntoView({ behavior: "smooth" });
+      setNotice("请先在快速开始页安装本地 MCP，再生成导读、分类和证据核验。");
+      window.location.assign(`${basePath}/quickstart`);
       return;
     }
     setLoadingId(entry.id);
@@ -387,6 +375,7 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
       }
     }
     setSettingsOpen(false);
+    if (bridgeStatus !== "connected") setNotice("策略已应用到本次浏览。要长期保存，请在自己的 Fork 修改 workspace/settings.json，或连接 MCP 后提交并推送。");
     if (bridgeStatus === "connected") void runAutoEnhance();
   };
 
@@ -414,13 +403,14 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
     setBridgeStatus("disconnected");
     window.sessionStorage.removeItem("agent-workbench-local-url");
     setBridgeUrl("http://127.0.0.1:4317");
+    setKnowledgeEntries(entries);
+    setGuides(initialGuides);
     setPetOpen(false);
     setNotice("本地连接已安全断开，本地服务已经停止。");
   };
 
   const chooseSource = (source: SourceType) => {
-    setSourceFilter(source);
-    document.getElementById("knowledge")?.scrollIntoView({ behavior: "smooth" });
+    window.location.assign(`${basePath}/knowledge?source=${source}`);
   };
 
   const toggleSource = (source: SourceType) => {
@@ -460,19 +450,19 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
   return (
     <main>
       <header className="site-header">
-        <a className="brand" href="#top" aria-label="Agent Workbench 首页">
+        <Link className="brand" href="/" aria-label="Agent Workbench Dashboard">
           <span className="brand-mark">AW</span>
           <span>Agent Workbench</span>
-        </a>
+        </Link>
         <nav aria-label="主导航">
-          <a href="#quickstart">快速开始</a>
-          <a href="#radar">今日雷达</a>
-          <a href="#sources">来源</a>
-          <a href="#knowledge">知识库</a>
-          <a href="#workflow">工作流</a>
+          <Link className={view === "dashboard" ? "active" : ""} href="/">Dashboard</Link>
+          <Link className={view === "knowledge" ? "active" : ""} href="/knowledge">知识库</Link>
+          <Link className={view === "sources" ? "active" : ""} href="/sources">来源</Link>
+          <Link className={view === "automation" ? "active" : ""} href="/automation">自动化</Link>
+          <Link href="/quickstart">快速开始</Link>
         </nav>
         <div className="header-actions">
-          <button type="button" className={`ai-config-button${aiEnabled ? " configured" : ""}`} onClick={() => aiEnabled ? setSettingsOpen(true) : document.getElementById("quickstart")?.scrollIntoView({ behavior: "smooth" })}>
+          <button type="button" className={`ai-config-button${aiEnabled ? " configured" : ""}`} onClick={() => aiEnabled ? setSettingsOpen(true) : window.location.assign(`${basePath}/quickstart`)}>
             <span>{aiEnabled ? "●" : "○"}</span>{aiEnabled ? "Local CLI 已连接" : "连接本地 CLI"}
           </button>
           <div className={`sync-pill${bridgeStatus === "connected" ? " bridge-live" : ""}`}><span />{bridgeStatus === "connected" ? "LOCAL MCP · LIVE" : `个人雷达 ${workspace.radarTime}`}</div>
@@ -481,44 +471,14 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
 
       <div className={`mode-strip ${aiEnabled ? "ai-mode" : "basic-mode"}`}>
         <strong>{aiEnabled ? "本地 CLI AI 模式" : "GitHub 基础模式"}</strong>
-        <span>{aiEnabled ? "自动导读 · 自动分类 · 联网证据核验" : "公开知识 · 过期规则 · 等待本地 CLI"}</span>
+        <span>{aiEnabled ? "自动导读 · 自动分类 · 联网证据核验" : "当前 Fork 知识 · 过期规则 · 等待本地 CLI"}</span>
         {autoProgress && <span className="mode-progress">正在增强 {autoProgress.done}/{autoProgress.total}</span>}
         {bridgeStatus === "connected" && <span className="bridge-indicator">本地 CLI 正在驱动 · {bridgeUpdatedAt ? new Date(bridgeUpdatedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "已连接"}</span>}
         {notice && !settingsOpen && <button type="button" onClick={() => setNotice("")} aria-label="关闭通知">{notice} ×</button>}
       </div>
 
-      <section className="hero quickstart-hero" id="quickstart">
-        <div className="hero-copy">
-          <p className="eyebrow">QUICK START · LOCAL FIRST</p>
-          <h1>3 分钟连接<br /><em>本地 CLI。</em></h1>
-          <p className="hero-lede">网站不接收 API Key。运行一条安装命令后，MCP 注册、本地连接和打开网站全部自动完成；导读、自动分类、联网证据核验和桌宠对话均使用你已登录的本机 CLI。</p>
-          <div className="quickstart-status">
-            <span className={aiEnabled ? "ready" : "waiting"} />
-            <div><strong>{aiEnabled ? "本地能力已就绪" : "等待本地 CLI"}</strong><small>{aiEnabled ? "正在使用 Local Codex CLI" : "先复制右侧的一键安装命令"}</small></div>
-          </div>
-          <div className="hero-actions">
-            <button type="button" className="primary-button" onClick={() => void copyInstallCommand()}>{copiedCommand ? "已复制安装命令" : "复制一键安装命令"} <span>{copiedCommand ? "✓" : "↗"}</span></button>
-            <a className="text-button" href="#workflow">查看它能控制什么 <span>→</span></a>
-          </div>
-        </div>
-
-        <div className="quickstart-console" aria-label="本地 CLI 快速开始">
-          <div className="console-topline"><span>LOCAL SETUP</span><span className={aiEnabled ? "connected" : "idle"}>{aiEnabled ? "CONNECTED" : "3 STEPS"}</span></div>
-          <div className="setup-step">
-            <span>01</span><div><strong>安装并注册 MCP</strong><p>整行复制到终端执行。</p><code>{installCommand}</code></div>
-            <button type="button" onClick={() => void copyInstallCommand()}>{copiedCommand ? "已复制" : "复制"}</button>
-          </div>
-          <div className="setup-step">
-            <span>02</span><div><strong>CLI 自动完成配置</strong><p>命令会安装依赖、注册 MCP，并在后台启动仅监听本机的安全连接。</p></div>
-          </div>
-          <div className="setup-step">
-            <span>03</span><div><strong>网站自动打开并连接</strong><p>无需填写地址或凭据；首次连接时允许浏览器访问本地网络，即刻开始 AI 增强。</p></div>
-          </div>
-          <div className="setup-flow" aria-hidden="true"><span>GITHUB KNOWLEDGE</span><i>→</i><span>WEB UI</span><i>→</i><span>LOCAL CLI</span><b /></div>
-        </div>
-      </section>
-
-      <section className="metrics" aria-label="知识指标">
+      {view === "dashboard" && <>
+      <section className="metrics dashboard-metrics" aria-label="知识指标">
         <article><span>01</span><strong>{verified}</strong><p>已验证知识</p></article>
         <article><span>02</span><strong>{review}</strong><p>即将到期</p></article>
         <article><span>03</span><strong>{stale}</strong><p>退出检索</p></article>
@@ -528,7 +488,7 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
       <section className="section" id="radar">
         <div className="section-heading">
           <div><p className="eyebrow">DAILY BRIEFING · 过去 24 小时</p><h2>今天值得你注意的变化</h2></div>
-          <a href="#knowledge">查看全部知识 <span>↗</span></a>
+          <Link href="/knowledge">查看全部知识 <span>↗</span></Link>
         </div>
         <div className="radar-grid">
           {radar.map((entry, index) => (
@@ -546,10 +506,12 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
               </div>
             </article>
           ))}
+          {radar.length === 0 && <div className="empty-state dashboard-empty"><strong>你的知识库还是空的。</strong><p>先完成 Fork 和来源配置，再运行一次采集。</p><Link href="/quickstart">打开快速开始 →</Link></div>}
         </div>
       </section>
+      </>}
 
-      <section className="source-section" id="sources">
+      {view === "sources" && <section className="source-section page-section" id="sources">
         <div className="source-intro">
           <p className="eyebrow">SOURCE LENSES</p>
           <h2>五路信号，分开判断。</h2>
@@ -569,9 +531,9 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
             );
           })}
         </div>
-      </section>
+      </section>}
 
-      <section className="freshness-section" id="freshness">
+      {view === "automation" && <section className="freshness-section page-section" id="freshness">
         <div className="freshness-copy">
           <p className="eyebrow">KNOWLEDGE FRESHNESS</p>
           <h2>{aiEnabled ? "AI 自动增强，证据负责定级。" : "规则保持新鲜，人工决定采信。"}</h2>
@@ -581,6 +543,7 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
           <div className="lifecycle" aria-label="知识生命周期">
             <span>发现</span><i>→</i><span>{aiEnabled ? "AI 增强" : "来源摘录"}</span><i>→</i><span>{aiEnabled ? "证据建议" : "人工核对"}</span><i>→</i><span>复核</span><i>→</i><span>归档</span>
           </div>
+          <button type="button" className="primary-button policy-button" onClick={() => setSettingsOpen(true)}>配置来源、时间与过期策略 <span>→</span></button>
         </div>
         <div className="expiry-panel">
           <div className="expiry-header"><span>即将到期</span><strong>{review + stale}</strong></div>
@@ -592,9 +555,9 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
           ))}
           <a className="audit-link" href={`${repositoryUrl}/actions/workflows/freshness-audit.yml`} target="_blank" rel="noreferrer">查看审计工作流 <span>↗</span></a>
         </div>
-      </section>
+      </section>}
 
-      <section className="section library" id="knowledge">
+      {view === "knowledge" && <section className="section library page-section" id="knowledge">
         <div className="section-heading library-heading">
           <div><p className="eyebrow">GUIDED LIBRARY</p><h2>知识库与导读</h2></div>
           <label className="search-box"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索工具、论文、框架…" aria-label="搜索知识库" /></label>
@@ -630,17 +593,17 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
           ))}
           {filtered.length === 0 && <div className="empty-state">没有符合条件的知识条目。</div>}
         </div>
-      </section>
+      </section>}
 
-      <section className="workflow-section" id="workflow">
+      {view === "automation" && <section className="workflow-section" id="workflow">
         <div className="section-heading"><div><p className="eyebrow">AUTOMATED ROUTINES</p><h2>让知识自己保持清醒</h2></div></div>
         <div className="workflow-grid">
           <article><span>PERSONAL · {workspace.radarTime}</span><h3>Multi-source Radar</h3><p>按你的五类来源开关与默认 {workspace.defaultTtlDays} 天有效期整理个人知识视图。</p><code>{workspace.enabledSources.length} sources enabled</code>{bridgeStatus === "connected" && <button type="button" onClick={() => runBridgeRoutine("sync")} disabled={Boolean(bridgeRoutine)}>{bridgeRoutine === "sync" ? "正在采集…" : "由本地 CLI 立即采集"}</button>}</article>
           <article><span>{dayLabels[workspace.auditDay]} · {workspace.auditTime}</span><h3>Freshness Audit</h3><p>提前 {workspace.reviewWindowDays} 天进入复核，过期内容退出默认检索。</p><code>review_window={workspace.reviewWindowDays}d</code>{bridgeStatus === "connected" && <button type="button" onClick={() => runBridgeRoutine("audit")} disabled={Boolean(bridgeRoutine)}>{bridgeRoutine === "audit" ? "正在审计…" : "由本地 CLI 立即审计"}</button>}</article>
           <article><span>MONTHLY · {workspace.gcDay} 日 {workspace.gcTime}</span><h3>Knowledge GC</h3><p>过期超过 {workspace.archiveAfterDays} 天后归档，同时保留来源和审计记录。</p><code>archive_after={workspace.archiveAfterDays}d</code>{bridgeStatus === "connected" && <button type="button" onClick={() => runBridgeRoutine("gc")} disabled={Boolean(bridgeRoutine)}>{bridgeRoutine === "gc" ? "正在归档…" : "由本地 CLI 立即归档"}</button>}</article>
         </div>
-        <p className="workflow-note">{bridgeStatus === "connected" ? "本地 CLI 已连接：网页知识始终来自 GitHub；本机负责 AI 导读、自动分类、证据核验、桌宠控制和页面会话内的个性化调度。维护任务的本地修改需提交到 GitHub 后才会进入在线知识库。" : "个人设置影响当前工作台；关闭页面后的公共知识维护仍由 GitHub Actions 执行。运行首页一键命令后即可复用本机 CLI 的完整 AI 能力。"}</p>
-      </section>
+        <p className="workflow-note">{bridgeStatus === "connected" ? "本地 CLI 已连接：你的 Fork 是知识事实源；本机负责 AI 导读、自动分类、证据核验和桌宠控制。检查本地差异后提交并推送，Pages 才会长期展示更新。" : "你的 Fork 中的 GitHub Actions 负责持续采集、复核与归档；打开快速开始页可复用本机 CLI 的完整 AI 能力。"}</p>
+      </section>}
 
       <footer>
         <div><span className="brand-mark">AW</span><strong>Agent Workbench</strong></div>
@@ -653,7 +616,7 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
           <section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" onMouseDown={(event) => event.stopPropagation()}>
             <div className="settings-topline"><span>PERSONAL WORKBENCH</span><button type="button" onClick={() => setSettingsOpen(false)} aria-label="关闭工作台设置">×</button></div>
             <h2 id="settings-title">配置你的工作台</h2>
-            <p className="settings-lede">来源、时间和过期策略可以手动设置。AI 导读、分类、联网核验与桌宠均复用本机 CLI 登录；在线知识始终以 GitHub 为准。</p>
+            <p className="settings-lede">来源、时间和过期策略可以手动设置。AI 导读、分类、联网核验与桌宠均复用本机 CLI 登录；长期数据始终以你自己的 GitHub Fork 为准。</p>
 
             <fieldset className="settings-group bridge-settings">
               <legend>本地 MCP 状态</legend>
@@ -683,7 +646,7 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
                 <label>每月归档日<input type="number" min="1" max="28" value={workspace.gcDay} onChange={(event) => setWorkspace((current) => ({ ...current, gcDay: clamp(event.target.value, 1, 28, current.gcDay) }))} /></label>
                 <label>归档时间<input type="time" value={workspace.gcTime} onChange={(event) => setWorkspace((current) => ({ ...current, gcTime: event.target.value }))} /></label>
               </div>
-              <p className="field-note">页面保持打开时，本地 CLI 会按个人时间运行；关闭页面后本地连接自动退出，公共知识维护继续由 GitHub Actions 执行。</p>
+              <p className="field-note">页面保持打开时，本地 CLI 会按个人时间运行；关闭页面后本地连接自动退出，你的 Fork 中的 GitHub Actions 继续维护知识。</p>
             </fieldset>
 
             <fieldset className="settings-group">
@@ -698,7 +661,7 @@ export function Workbench({ entries }: { entries: KnowledgeEntry[] }) {
             <div className="security-note"><strong>无浏览器密钥</strong><p>网站没有 API Key 或模型端点输入框，也不会保存模型凭据。本地地址仅在当前标签页会话中用于刷新重连；本地服务只监听 127.0.0.1，并在页面心跳停止后自动退出。</p></div>
             {notice && <p className="settings-notice" role="alert">{notice}</p>}
             <div className="settings-actions">
-              <button type="button" className="primary-button" onClick={() => void saveSettings()}>{bridgeStatus === "connected" ? "同步设置并运行本地 AI" : "保存到本设备"} <span>✓</span></button>
+              <button type="button" className="primary-button" onClick={() => void saveSettings()}>{bridgeStatus === "connected" ? "写入工作副本并运行本地 AI" : "应用到本次浏览"} <span>✓</span></button>
             </div>
           </section>
         </div>

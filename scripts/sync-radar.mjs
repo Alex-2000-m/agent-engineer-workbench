@@ -4,6 +4,7 @@ import path from "node:path";
 
 const root = process.cwd();
 const watchlist = JSON.parse(await readFile(path.join(root, "watchlist/sources.json"), "utf8"));
+const settings = JSON.parse(await readFile(path.join(root, "workspace/settings.json"), "utf8"));
 const entriesPath = path.join(root, "knowledge/entries.json");
 const entries = JSON.parse(await readFile(entriesPath, "utf8"));
 const known = new Set(entries.map((entry) => entry.id));
@@ -123,6 +124,7 @@ async function rssItems(source) {
 }
 
 for (const source of watchlist) {
+  if (!settings.enabledSources.includes(source.sourceType)) continue;
   try {
     const items = source.adapter === "rss" ? await rssItems(source) : await githubReleases(source);
     for (const item of items) {

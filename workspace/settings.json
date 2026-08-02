@@ -1,0 +1,11 @@
+{
+  "enabledSources": ["github", "blog", "report", "news", "web"],
+  "radarTime": "08:37",
+  "auditDay": "fri",
+  "auditTime": "17:17",
+  "gcDay": 1,
+  "gcTime": "09:23",
+  "reviewWindowDays": 7,
+  "archiveAfterDays": 30,
+  "defaultTtlDays": 21
+}
