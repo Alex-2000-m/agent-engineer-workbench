@@ -23,6 +23,7 @@ type BridgeSnapshot = {
   updatedAt: string;
   settings: WorkspaceSettings;
   entries?: KnowledgeEntry[];
+  sources?: WatchSource[];
   guides?: Record<string, Guide & { sourceVersion?: string }>;
 };
 
@@ -58,6 +59,18 @@ export type KnowledgeEntry = {
   impact: string;
   tags: string[];
   action: string;
+};
+
+export type WatchSource = {
+  id: string;
+  adapter: "github-releases" | "rss";
+  sourceType: SourceType;
+  category: string;
+  ttlDays: number;
+  repo?: string;
+  name?: string;
+  feedUrl?: string;
+  keywords?: string[];
 };
 
 const statusLabel: Record<KnowledgeStatus, string> = {
@@ -179,13 +192,14 @@ function applyFreshnessPolicy(entry: KnowledgeEntry, settings: WorkspaceSettings
 
 type WorkbenchView = "dashboard" | "knowledge" | "sources" | "automation";
 
-export function Workbench({ entries, initialGuides, initialSettings = defaultWorkspaceSettings, view = "dashboard" }: { entries: KnowledgeEntry[]; initialGuides: Record<string, Guide>; initialSettings?: WorkspaceSettings; view?: WorkbenchView }) {
+export function Workbench({ entries, initialGuides, initialSettings = defaultWorkspaceSettings, initialSources, view = "dashboard" }: { entries: KnowledgeEntry[]; initialGuides: Record<string, Guide>; initialSettings?: WorkspaceSettings; initialSources: WatchSource[]; view?: WorkbenchView }) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | KnowledgeStatus>("all");
   const [sourceFilter, setSourceFilter] = useState<"all" | SourceType>("all");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [workspace, setWorkspace] = useState(initialSettings);
   const [knowledgeEntries, setKnowledgeEntries] = useState(entries);
+  const [watchSources, setWatchSources] = useState(initialSources);
   const [guides, setGuides] = useState<Record<string, Guide>>(initialGuides);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [autoProgress, setAutoProgress] = useState<{ done: number; total: number } | null>(null);
@@ -231,6 +245,7 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
   const applyBridgeSnapshot = useCallback((snapshot: BridgeSnapshot) => {
     if (snapshot.settings) setWorkspace((current) => applyWorkspacePatch(current, snapshot.settings));
     if (snapshot.entries) setKnowledgeEntries(snapshot.entries);
+    if (snapshot.sources) setWatchSources(snapshot.sources);
     if (snapshot.guides) {
       const currentEntries = snapshot.entries ?? knowledgeEntries;
       const forkVersions = new Map(currentEntries.map((entry) => [entry.id, entry.sourceVersion]));
@@ -308,11 +323,12 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
         setBridgeStatus("error");
         window.sessionStorage.removeItem("agent-workbench-local-url");
         setKnowledgeEntries(entries);
+        setWatchSources(initialSources);
         setGuides(initialGuides);
       }
     }, 5_000);
     return () => window.clearInterval(timer);
-  }, [applyBridgeSnapshot, bridgeRequest, bridgeStatus, entries, initialGuides]);
+  }, [applyBridgeSnapshot, bridgeRequest, bridgeStatus, entries, initialGuides, initialSources]);
 
   const policyEntries = knowledgeEntries.map((entry) => applyFreshnessPolicy(entry, workspace));
   const activeEntries = policyEntries.filter((entry) => entry.status !== "archived" && workspace.enabledSources.includes(entry.sourceType));
@@ -404,6 +420,7 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
     window.sessionStorage.removeItem("agent-workbench-local-url");
     setBridgeUrl("http://127.0.0.1:4317");
     setKnowledgeEntries(entries);
+    setWatchSources(initialSources);
     setGuides(initialGuides);
     setPetOpen(false);
     setNotice("本地连接已安全断开，本地服务已经停止。");
@@ -511,7 +528,7 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
       </section>
       </>}
 
-      {view === "sources" && <section className="source-section page-section" id="sources">
+      {view === "sources" && <><section className="source-section page-section" id="sources">
         <div className="source-intro">
           <p className="eyebrow">SOURCE LENSES</p>
           <h2>五路信号，分开判断。</h2>
@@ -531,7 +548,25 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
             );
           })}
         </div>
-      </section>}
+      </section>
+      <section className="source-registry" aria-labelledby="source-registry-title">
+        <div className="section-heading">
+          <div><p className="eyebrow">YOUR WATCHLIST · {watchSources.length} SOURCES</p><h2 id="source-registry-title">当前 Fork 的实际监测源</h2></div>
+        </div>
+        <div className="source-registry-grid">
+          {watchSources.map((source) => {
+            const href = source.adapter === "github-releases" ? `https://github.com/${source.repo}` : source.feedUrl;
+            return <article key={source.id}>
+              <div><span>{source.adapter === "github-releases" ? "GH" : "RSS"}</span><small>{source.sourceType} · {source.category}</small></div>
+              <h3>{source.name ?? source.repo}</h3>
+              <p>{source.adapter === "github-releases" ? source.repo : source.feedUrl}</p>
+              <div className="source-registry-meta"><code>{source.id}</code><span>TTL {source.ttlDays}d</span>{href && <a href={href} target="_blank" rel="noreferrer">打开 ↗</a>}</div>
+            </article>;
+          })}
+          {watchSources.length === 0 && <div className="empty-state">当前 Fork 还没有监测源。</div>}
+        </div>
+        <div className="cli-chat-callout"><span>CLI CHAT</span><div><strong>直接告诉 Codex 你想关注什么</strong><p>它会调用 MCP 更新当前 Fork 的来源文件，并展示 Git 差异。</p><code>“关注 anthropics/anthropic-sdk-python 的 Release，归为 SDK，14 天复核；再移除我不再看的来源。”</code></div></div>
+      </section></>}
 
       {view === "automation" && <section className="freshness-section page-section" id="freshness">
         <div className="freshness-copy">
@@ -593,6 +628,7 @@ export function Workbench({ entries, initialGuides, initialSettings = defaultWor
           ))}
           {filtered.length === 0 && <div className="empty-state">没有符合条件的知识条目。</div>}
         </div>
+        <div className="cli-chat-callout knowledge-chat-callout"><span>CLI CHAT</span><div><strong>用聊天新增或修改知识</strong><p>Codex 会调用 MCP 写入当前 Fork；新增和修改后的内容一律回到待验证状态。</p><code>“把这篇报告加入知识库，摘要重点放在评测方法；再把条目 abc 的工程影响改成适用于多 Agent 路由。”</code></div></div>
       </section>}
 
       {view === "automation" && <section className="workflow-section" id="workflow">

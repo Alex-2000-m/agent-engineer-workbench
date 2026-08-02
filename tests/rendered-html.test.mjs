@@ -43,8 +43,12 @@ test("knowledge, sources, and automation have separate pages", async () => {
     render("/automation").then((response) => response.text()),
   ]);
   assert.match(knowledge, /知识库与导读/);
+  assert.match(knowledge, /用聊天新增或修改知识/);
   assert.doesNotMatch(knowledge, /五路信号，分开判断/);
   assert.match(sources, /五路信号，分开判断/);
+  assert.match(sources, /当前 Fork 的实际监测源/);
+  assert.match(sources, /openai\/openai-agents-python/);
+  assert.match(sources, /直接告诉 Codex 你想关注什么/);
   assert.doesNotMatch(sources, /知识库与导读/);
   assert.match(automation, /让知识自己保持清醒/);
   assert.match(automation, /配置来源、时间与过期策略/);

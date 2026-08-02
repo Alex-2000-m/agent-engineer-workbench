@@ -187,6 +187,23 @@ h1 em { font-family: Georgia, "Times New Roman", serif; font-weight: 400; color:
 .source-grid p { grid-column: 2; margin: 0; color: var(--muted); font-size: 11px; }
 .source-grid small { grid-column: 2; align-self: end; display: flex; justify-content: space-between; color: #5d6b62; font: 9px ui-monospace, monospace; }
 
+.source-registry { padding: 88px clamp(24px, 7vw, 108px); border-top: 1px solid var(--line); background: var(--cream); }
+.source-registry-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.source-registry-grid article { min-width: 0; padding: 20px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.5); }
+.source-registry-grid article > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.source-registry-grid article > div:first-child > span { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: var(--ink); color: var(--lime); font: 800 9px ui-monospace, monospace; }
+.source-registry-grid small { color: var(--muted); font: 8px ui-monospace, monospace; text-transform: uppercase; }
+.source-registry-grid h3 { margin: 24px 0 8px; font-size: 17px; overflow-wrap: anywhere; }
+.source-registry-grid p { min-height: 34px; margin: 0; color: var(--muted); font: 9px/1.6 ui-monospace, monospace; overflow-wrap: anywhere; }
+.source-registry-meta { margin-top: 18px; padding-top: 13px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 9px; }
+.source-registry-meta code { overflow: hidden; text-overflow: ellipsis; }
+.source-registry-meta a { margin-left: auto; color: var(--ink); font-weight: 800; white-space: nowrap; }
+.cli-chat-callout { margin-top: 22px; padding: 18px 20px; border: 1px solid rgba(21,32,25,.2); border-radius: 8px; background: #dce8e0; display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 18px; }
+.cli-chat-callout > span { color: #58782b; font: 800 9px ui-monospace, monospace; letter-spacing: .12em; }
+.cli-chat-callout strong { display: block; font-size: 13px; }
+.cli-chat-callout p { margin: 6px 0 10px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.cli-chat-callout code { display: block; color: #405249; font: 9px/1.6 ui-monospace, monospace; overflow-wrap: anywhere; }
+
 .freshness-section { background: var(--ink); color: #fff; padding: 100px clamp(24px, 7vw, 108px); display: grid; grid-template-columns: 1fr 1fr; gap: clamp(50px, 10vw, 150px); }
 .freshness-copy > p:not(.eyebrow) { max-width: 590px; color: #aeb9b1; line-height: 1.8; font-size: 14px; }
 .freshness-copy .eyebrow { color: var(--lime); }
@@ -213,6 +230,7 @@ h1 em { font-family: Georgia, "Times New Roman", serif; font-weight: 400; color:
 .filter-row .result-count { margin-left: auto; color: var(--muted); font-size: 10px; }
 .filter-groups { margin-bottom: 28px; }
 .knowledge-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.knowledge-chat-callout { margin-top: 22px; }
 .knowledge-card { min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.52); padding: 22px; display: flex; flex-direction: column; }
 .knowledge-card-top { display: grid; grid-template-columns: 42px 1fr auto; gap: 12px; align-items: start; }
 .knowledge-card-top > div > span { color: #7a857e; font: 9px ui-monospace, monospace; text-transform: uppercase; }
@@ -328,6 +346,7 @@ footer > span { text-align: right; font: 9px ui-monospace, monospace; color: var
   .radar-grid, .workflow-grid { grid-template-columns: 1fr; }
   .radar-card { min-height: auto; }
   .source-section { grid-template-columns: 1fr; }
+  .source-registry-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .freshness-section { grid-template-columns: 1fr; }
   .knowledge-grid { grid-template-columns: 1fr; }
   .knowledge-row { grid-template-columns: 44px 1fr 24px; padding: 18px 0; }
@@ -359,6 +378,9 @@ footer > span { text-align: right; font: 9px ui-monospace, monospace; color: var
   .lifecycle i { display: none; }
   .source-grid { grid-template-columns: 1fr; }
   .source-grid button, .source-grid button:last-child { grid-column: auto; border-right: 0; }
+  .source-registry { padding: 72px 22px; }
+  .source-registry-grid { grid-template-columns: 1fr; }
+  .cli-chat-callout { grid-template-columns: 1fr; gap: 8px; }
   .settings-dialog { padding: 22px 17px; }
   .settings-grid, .settings-grid.three-columns { grid-template-columns: 1fr; }
   .source-checks { grid-template-columns: repeat(2, 1fr); }
